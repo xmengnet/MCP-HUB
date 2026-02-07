@@ -13,10 +13,8 @@ import (
 	"mcp-hub/internal/mcp"
 
 	// 导入服务包触发 init() 自动注册
+	_ "mcp-hub/services/archlinux"
 	_ "mcp-hub/services/workday"
-	// 添加新服务只需在此添加空导入:
-	// _ "mcp-hub/services/weather"
-	// _ "mcp-hub/services/calendar"
 )
 
 func main() {

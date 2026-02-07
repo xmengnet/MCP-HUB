@@ -15,12 +15,12 @@
 - 🐳 **Docker 支持** - 一键容器化部署
 - 🧩 **Init 自动注册** - 空导入即可注册，无需修改 main 函数
 
-## 📦 内置服务
+## 内置服务
 
 | 服务 | 路径 | 描述 |
 |------|------|------|
 | 工作日服务 | `/mcp/workday` | 中国节假日和工作日计算 |
-| *更多服务开发中...* | | |
+| Arch Linux 服务 | `/mcp/archlinux` | 官方仓库和 AUR 软件包搜索 |
 
 ## 🚀 快速开始
 
@@ -100,6 +100,18 @@ curl -X POST http://localhost:8080/mcp/workday \
 | `get_next_holiday` | 查找下一个节假日 |
 | `batch_check_dates` | 批量查询日期 |
 | `get_period_workdays` | 计算时间段工作日 |
+
+## 🐧 Arch Linux 服务工具
+
+| 工具 | 参数 | 描述 |
+|------|------|------|
+| `search_package` | `keyword`, `repo?`, `source?` | 搜索官方仓库和 AUR 软件包 |
+| `get_package_info` | `name`, `source?` | 获取包详情（依赖、许可证、维护者等） |
+| `get_maintainer_packages` | `maintainer` | 获取 AUR 维护者的所有包 |
+
+**参数说明:**
+- `source`: `official`（官方仓库）、`aur`、`all`（默认）
+- `repo`: 指定仓库，如 `core`, `extra`, `multilib`
 
 ## 🔐 认证
 
