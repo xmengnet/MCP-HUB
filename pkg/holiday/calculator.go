@@ -41,6 +41,38 @@ type DateInfo struct {
 	Name      string `json:"name"`       // 节日名称（如有）
 }
 
+// DateInfoAPIResponse /api/holiday/info 接口响应结构
+type DateInfoAPIResponse struct {
+	Code int `json:"code"`
+	Type struct {
+		Type int    `json:"type"` // 0工作日 1周末 2节日 3调休
+		Name string `json:"name"` // 类型中文名
+		Week int    `json:"week"` // 1-7 表示周一到周日
+	} `json:"type"`
+	Holiday *struct {
+		Holiday bool   `json:"holiday"` // true节假日 false调休
+		Name    string `json:"name"`    // 节假日/调休名称
+		Wage    int    `json:"wage"`    // 薪资倍数
+		After   bool   `json:"after"`   // 调休：放假后调休
+		Target  string `json:"target"`  // 调休：对应的节假日
+	} `json:"holiday"` // 非节假日时为 null
+}
+
+// DateDetailInfo 日期详情（包含完整信息）
+type DateDetailInfo struct {
+	Date          string `json:"date"`           // 日期
+	TypeCode      int    `json:"type_code"`      // 类型代码: 0工作日 1周末 2节日 3调休
+	TypeName      string `json:"type_name"`      // 类型名称
+	WeekDay       int    `json:"week_day"`       // 星期几 1-7
+	IsHoliday     bool   `json:"is_holiday"`     // 是否为节假日
+	IsWorkday     bool   `json:"is_workday"`     // 是否需要上班
+	Name          string `json:"name"`           // 节假日/调休名称
+	Wage          int    `json:"wage"`           // 薪资倍数
+	IsTransfer    bool   `json:"is_transfer"`    // 是否为调休日
+	AfterHoliday  bool   `json:"after_holiday"`  // 是否为假后调休
+	TargetHoliday string `json:"target_holiday"` // 调休对应的节假日
+}
+
 // WorkDayCalculator 工作日计算器
 type WorkDayCalculator struct {
 	client    *http.Client
@@ -311,4 +343,73 @@ func (calc *WorkDayCalculator) BatchCheckDates(dates []string) (map[string]*Date
 	}
 
 	return result, nil
+}
+
+// GetDateDetail 获取指定日期的详细节假日信息
+// 使用 /api/holiday/info 接口，返回更完整的日期类型和节假日信息
+func (calc *WorkDayCalculator) GetDateDetail(dateString string) (*DateDetailInfo, error) {
+	// 构建 URL，如果日期为空则使用服务器当前时间
+	url := "https://timor.tech/api/holiday/info"
+	if dateString != "" {
+		url = fmt.Sprintf("https://timor.tech/api/holiday/info/%s", dateString)
+	}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %v", err)
+	}
+	req.Header.Set("User-Agent", calc.userAgent)
+
+	resp, err := calc.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API返回错误状态码: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	var apiResp DateInfoAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("解析JSON失败: %v", err)
+	}
+
+	if apiResp.Code != 0 {
+		return nil, fmt.Errorf("API返回错误码: %d", apiResp.Code)
+	}
+
+	// 构建返回结果
+	detail := &DateDetailInfo{
+		Date:      dateString,
+		TypeCode:  apiResp.Type.Type,
+		TypeName:  apiResp.Type.Name,
+		WeekDay:   apiResp.Type.Week,
+		IsWorkday: apiResp.Type.Type == 0 || apiResp.Type.Type == 3, // 工作日或调休上班
+		IsHoliday: apiResp.Type.Type == 2,                           // 节日
+		Wage:      1,
+	}
+
+	// 处理节假日/调休信息
+	if apiResp.Holiday != nil {
+		detail.Name = apiResp.Holiday.Name
+		detail.Wage = apiResp.Holiday.Wage
+		detail.IsTransfer = !apiResp.Holiday.Holiday // holiday=false 表示是调休
+		detail.AfterHoliday = apiResp.Holiday.After
+		detail.TargetHoliday = apiResp.Holiday.Target
+
+		// 根据 holiday 字段判断是否真正放假
+		if apiResp.Holiday.Holiday {
+			detail.IsWorkday = false
+		} else {
+			detail.IsWorkday = true // 调休需要上班
+		}
+	}
+
+	return detail, nil
 }

@@ -139,7 +139,7 @@ func (r *Registry) Start(addr string) error {
 
 	log.Println("已注册的服务:")
 	for _, svc := range r.services {
-		log.Printf("  - %s: http://localhost%s%s", svc.Name(), addr, svc.Path())
+		log.Printf("  - %s: %s", svc.Name(), svc.Path())
 	}
 
 	return http.ListenAndServe(addr, r.Handler())
@@ -178,14 +178,21 @@ func (r *Registry) handleIndex(w http.ResponseWriter, req *http.Request) {
     <p>以下是已注册的 MCP 服务：</p>
 `, authStatus)
 
+	// 获取请求的 Host 构建完整 URL
+	scheme := "http"
+	if req.TLS != nil {
+		scheme = "https"
+	}
+	host := req.Host
+
 	for _, svc := range r.services {
 		fmt.Fprintf(w, `
     <div class="service">
         <h3>%s</h3>
         <p>%s</p>
-        <p>端点: <code>http://localhost%s%s</code></p>
+        <p>端点: <code>%s://%s%s</code></p>
     </div>
-`, svc.Name(), svc.Description(), r.addr, svc.Path())
+`, svc.Name(), svc.Description(), scheme, host, svc.Path())
 	}
 
 	fmt.Fprintf(w, `

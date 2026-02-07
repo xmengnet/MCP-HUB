@@ -176,6 +176,17 @@ func (s *Service) registerTools() {
 		),
 		s.handleGetPeriodWorkdays,
 	)
+
+	// 9. 获取日期详细信息
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_date_detail",
+			mcp.WithDescription("获取指定日期的详细节假日信息，包括日期类型、调休信息、薪资倍数等完整信息"),
+			mcp.WithString("date",
+				mcp.Description("日期，格式 YYYY-MM-DD，如 2026-02-14。可省略则使用当前日期"),
+			),
+		),
+		s.handleGetDateDetail,
+	)
 }
 
 // --- 工具处理函数 ---
@@ -328,4 +339,52 @@ func (s *Service) handleGetPeriodWorkdays(ctx context.Context, req mcp.CallToolR
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("从 %s 到 %s 期间共有 %d 个工作日", startDate, endDate, workdays)), nil
+}
+
+func (s *Service) handleGetDateDetail(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	date, _ := req.RequireString("date")
+
+	detail, err := s.calc.GetDateDetail(date)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// 构建友好的输出
+	weekDays := []string{"", "周一", "周二", "周三", "周四", "周五", "周六", "周日"}
+	weekDay := ""
+	if detail.WeekDay >= 1 && detail.WeekDay <= 7 {
+		weekDay = weekDays[detail.WeekDay]
+	}
+
+	workStatus := "需要上班"
+	if !detail.IsWorkday {
+		workStatus = "休息日"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📅 日期: %s (%s)\n", detail.Date, weekDay))
+	sb.WriteString(fmt.Sprintf("📌 类型: %s\n", detail.TypeName))
+	sb.WriteString(fmt.Sprintf("💼 状态: %s\n", workStatus))
+
+	if detail.Name != "" {
+		sb.WriteString(fmt.Sprintf("🎉 名称: %s\n", detail.Name))
+	}
+
+	if detail.Wage > 1 {
+		sb.WriteString(fmt.Sprintf("💰 薪资: %d倍工资\n", detail.Wage))
+	}
+
+	if detail.IsTransfer {
+		sb.WriteString(fmt.Sprintf("🔄 调休类型: %s调休\n", func() string {
+			if detail.AfterHoliday {
+				return "假后"
+			}
+			return "假前"
+		}()))
+		if detail.TargetHoliday != "" {
+			sb.WriteString(fmt.Sprintf("🎯 对应节日: %s\n", detail.TargetHoliday))
+		}
+	}
+
+	return mcp.NewToolResultText(sb.String()), nil
 }
