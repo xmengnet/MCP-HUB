@@ -234,30 +234,57 @@ func (calc *WorkDayCalculator) GetDateInfo(dateString string) (*DateInfo, error)
 	return info, nil
 }
 
-// GetNextWorkday 查找下一个工作日
+// NextWorkdayResponse 下一个工作日 API 响应
+type NextWorkdayResponse struct {
+	Code    int `json:"code"`
+	Workday *struct {
+		Type int    `json:"type"` // 0: 工作日, 3: 调休
+		Name string `json:"name"` // 周一至周五 或 某某调休
+		Week int    `json:"week"` // 1-7，周一至周日
+		Date string `json:"date"` // 工作日日期
+		Rest int    `json:"rest"` // 距离目标还有多少天
+	} `json:"workday"`
+}
+
+// GetNextWorkday 查找下一个工作日（使用官方 API）
 func (calc *WorkDayCalculator) GetNextWorkday(dateString string) (string, error) {
-	date, err := time.Parse("2006-01-02", dateString)
+	url := fmt.Sprintf("https://timor.tech/api/holiday/workday/next/%s", dateString)
+
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", fmt.Errorf("日期格式错误: %v", err)
+		return "", fmt.Errorf("创建请求失败: %v", err)
+	}
+	req.Header.Set("User-Agent", calc.userAgent)
+
+	resp, err := calc.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API返回错误状态码: %d", resp.StatusCode)
 	}
 
-	// 最多查找365天
-	for i := 1; i <= 365; i++ {
-		nextDate := date.AddDate(0, 0, i)
-		year, month, day := nextDate.Year(), int(nextDate.Month()), nextDate.Day()
-
-		holidays, err := calc.GetMonthHolidays(year, month)
-		if err != nil {
-			continue
-		}
-
-		isHoliday, _ := calc.IsHolidayOrWorkday(year, month, day, holidays.Holiday)
-		if !isHoliday {
-			return nextDate.Format("2006-01-02"), nil
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %v", err)
 	}
 
-	return "", fmt.Errorf("未找到下一个工作日")
+	var result NextWorkdayResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析JSON失败: %v", err)
+	}
+
+	if result.Code != 0 {
+		return "", fmt.Errorf("API返回错误")
+	}
+
+	if result.Workday == nil {
+		return "", fmt.Errorf("未找到下一个工作日")
+	}
+
+	return result.Workday.Date, nil
 }
 
 // GetNextHoliday 查找下一个节假日（法定节日或周末）

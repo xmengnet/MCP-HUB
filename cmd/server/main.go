@@ -17,11 +17,27 @@ import (
 	_ "mcp-hub/services/workday"
 )
 
+// getEnv 获取环境变量，如果不存在则返回默认值
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvBool 获取布尔类型环境变量
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return value == "true" || value == "1" || value == "yes"
+	}
+	return defaultValue
+}
+
 func main() {
-	// 命令行参数
-	addr := flag.String("addr", ":8080", "服务监听地址")
-	apiKeys := flag.String("api-keys", "", "API Keys（逗号分隔），留空则不启用认证")
-	disableLog := flag.Bool("no-log", false, "禁用请求日志")
+	// 命令行参数（优先级：命令行 > 环境变量 > 默认值）
+	addr := flag.String("addr", getEnv("ADDR", ":8080"), "服务监听地址 (环境变量: ADDR)")
+	apiKeys := flag.String("api-keys", getEnv("API_KEYS", ""), "API Keys（逗号分隔），留空则不启用认证 (环境变量: API_KEYS)")
+	disableLog := flag.Bool("no-log", getEnvBool("NO_LOG", false), "禁用请求日志 (环境变量: NO_LOG)")
 	flag.Parse()
 
 	// 解析配置选项

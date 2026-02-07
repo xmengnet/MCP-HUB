@@ -2,12 +2,15 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"sync"
 
 	"mcp-hub/internal/middleware"
+	"mcp-hub/web"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -164,8 +167,11 @@ func (r *Registry) ListServices() []MCPService {
 func (r *Registry) Start(addr string) error {
 	r.addr = addr
 
-	// 添加根路径显示服务列表
+	// 添加页面路由
 	r.mux.HandleFunc("/", r.handleIndex)
+	r.mux.HandleFunc("/login", r.handleLogin)
+	r.mux.HandleFunc("/logout", r.handleLogout)
+	r.mux.HandleFunc("/playground", r.handlePlayground)
 
 	log.Println("=================================")
 	log.Printf("  MCP 服务器启动于 %s", addr)
@@ -196,51 +202,136 @@ func (r *Registry) handleIndex(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	authStatus := "🔓 公开访问"
-	if r.authConfig.Enabled {
-		authStatus = "🔐 需要 API Key"
+	type ServiceInfo struct {
+		Name        string
+		Description string
+		Path        string
+	}
+
+	var services []ServiceInfo
+	for _, svc := range r.services {
+		services = append(services, ServiceInfo{
+			Name:        svc.Name(),
+			Description: svc.Description(),
+			Path:        svc.Path(),
+		})
+	}
+
+	data := struct {
+		AuthEnabled bool
+		Services    []ServiceInfo
+	}{
+		AuthEnabled: r.authConfig.Enabled,
+		Services:    services,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>MCP 服务中心</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-        h1 { color: #333; }
-        .status { background: #e8f5e9; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
-        .service { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 8px; }
-        .service h3 { margin: 0 0 5px 0; color: #0066cc; }
-        .service p { margin: 5px 0; color: #666; }
-        .service code { background: #e0e0e0; padding: 2px 6px; border-radius: 4px; }
-    </style>
-</head>
-<body>
-    <h1>🚀 MCP 服务中心</h1>
-    <div class="status">状态: %s</div>
-    <p>以下是已注册的 MCP 服务：</p>
-`, authStatus)
-
-	// 获取请求的 Host 构建完整 URL
-	scheme := "http"
-	if req.TLS != nil {
-		scheme = "https"
+	if err := web.Templates.ExecuteTemplate(w, "index.html", data); err != nil {
+		http.Error(w, "模板渲染错误: "+err.Error(), http.StatusInternalServerError)
 	}
-	host := req.Host
+}
 
+// handleLogin 处理登录页面
+func (r *Registry) handleLogin(w http.ResponseWriter, req *http.Request) {
+	redirect := req.URL.Query().Get("redirect")
+	if redirect == "" {
+		redirect = "/"
+	}
+
+	// POST 请求处理登录
+	if req.Method == http.MethodPost {
+		apiKey := req.FormValue("api_key")
+		if apiKey == "" {
+			r.renderLoginPage(w, redirect, "请输入 API Key")
+			return
+		}
+
+		// 验证 API Key
+		valid := false
+		for _, key := range r.authConfig.APIKeys {
+			if key == apiKey {
+				valid = true
+				break
+			}
+		}
+
+		if !valid {
+			r.renderLoginPage(w, redirect, "无效的 API Key")
+			return
+		}
+
+		// 设置 Cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "api_key",
+			Value:    apiKey,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   86400 * 7, // 7天
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		// 重定向到目标页面
+		http.Redirect(w, req, redirect, http.StatusFound)
+		return
+	}
+
+	// GET 请求显示登录页面
+	r.renderLoginPage(w, redirect, "")
+}
+
+// renderLoginPage 渲染登录页面
+func (r *Registry) renderLoginPage(w http.ResponseWriter, redirect, errorMsg string) {
+	data := struct {
+		Redirect string
+		Error    string
+	}{
+		Redirect: redirect,
+		Error:    errorMsg,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	web.Templates.ExecuteTemplate(w, "login.html", data)
+}
+
+// handleLogout 处理登出
+func (r *Registry) handleLogout(w http.ResponseWriter, req *http.Request) {
+	// 清除 Cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "api_key",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+
+	http.Redirect(w, req, "/login", http.StatusFound)
+}
+
+// handlePlayground 处理 Playground 页面
+func (r *Registry) handlePlayground(w http.ResponseWriter, req *http.Request) {
+	type ServiceInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Path        string `json:"path"`
+	}
+
+	var services []ServiceInfo
 	for _, svc := range r.services {
-		fmt.Fprintf(w, `
-    <div class="service">
-        <h3>%s</h3>
-        <p>%s</p>
-        <p>端点: <code>%s://%s%s</code></p>
-    </div>
-`, svc.Name(), svc.Description(), scheme, host, svc.Path())
+		services = append(services, ServiceInfo{
+			Name:        svc.Name(),
+			Description: svc.Description(),
+			Path:        svc.Path(),
+		})
 	}
 
-	fmt.Fprintf(w, `
-</body>
-</html>
-`)
+	servicesJSON, _ := json.Marshal(services)
+
+	data := struct {
+		ServicesJSON template.JS
+	}{
+		ServicesJSON: template.JS(servicesJSON),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	web.Templates.ExecuteTemplate(w, "playground.html", data)
 }

@@ -26,7 +26,7 @@ func DefaultAuthConfig() AuthConfig {
 		APIKeys:      []string{},
 		Enabled:      false,
 		HeaderName:   "X-API-Key",
-		ExcludePaths: []string{"/"},
+		ExcludePaths: []string{"/login", "/logout"}, // 登录相关页面不需要认证
 	}
 }
 
@@ -56,7 +56,7 @@ func Auth(config AuthConfig) func(http.Handler) http.Handler {
 				}
 			}
 
-			// 获取 API Key
+			// 获取 API Key（优先级：Header > Bearer Token > Cookie）
 			apiKey := r.Header.Get(config.HeaderName)
 			if apiKey == "" {
 				// 也支持 Bearer token 格式
@@ -65,15 +65,30 @@ func Auth(config AuthConfig) func(http.Handler) http.Handler {
 					apiKey = strings.TrimPrefix(auth, "Bearer ")
 				}
 			}
-
-			// 验证 API Key
 			if apiKey == "" {
-				http.Error(w, "缺少 API Key，请在请求头中添加 X-API-Key 或 Authorization: Bearer <key>", http.StatusUnauthorized)
-				return
+				// 也支持 Cookie（浏览器友好）
+				if cookie, err := r.Cookie("api_key"); err == nil {
+					apiKey = cookie.Value
+				}
 			}
 
-			if !validKeys[apiKey] {
-				http.Error(w, "无效的 API Key", http.StatusUnauthorized)
+			// 验证 API Key
+			if apiKey == "" || !validKeys[apiKey] {
+				// 判断是否为浏览器请求
+				accept := r.Header.Get("Accept")
+				if strings.Contains(accept, "text/html") {
+					// 浏览器访问，重定向到登录页
+					http.Redirect(w, r, "/login?redirect="+r.URL.Path, http.StatusFound)
+					return
+				}
+				// API 请求，返回 JSON 错误
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				if apiKey == "" {
+					w.Write([]byte(`{"error":"missing_api_key","message":"请提供 API Key"}`))
+				} else {
+					w.Write([]byte(`{"error":"invalid_api_key","message":"无效的 API Key"}`))
+				}
 				return
 			}
 
