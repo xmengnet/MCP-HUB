@@ -11,7 +11,12 @@ import (
 	"syscall"
 
 	"mcp-hub/internal/mcp"
-	"mcp-hub/services/workday"
+
+	// 导入服务包触发 init() 自动注册
+	_ "mcp-hub/services/workday"
+	// 添加新服务只需在此添加空导入:
+	// _ "mcp-hub/services/weather"
+	// _ "mcp-hub/services/calendar"
 )
 
 func main() {
@@ -39,17 +44,9 @@ func main() {
 		opts = append(opts, mcp.WithLogger(true))
 	}
 
-	// 创建服务注册器
+	// 创建服务注册器并设置为默认（触发自动注册）
 	registry := mcp.NewRegistry(opts...)
-
-	// 注册 WorkDay 服务
-	if err := registry.Register(workday.NewService()); err != nil {
-		log.Fatalf("注册服务失败: %v", err)
-	}
-
-	// 未来可以注册更多服务:
-	// registry.Register(weather.NewService())
-	// registry.Register(calendar.NewService())
+	mcp.SetDefaultRegistry(registry)
 
 	// 优雅关闭
 	go func() {

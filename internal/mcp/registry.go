@@ -5,11 +5,55 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 
 	"mcp-hub/internal/middleware"
 
 	"github.com/mark3labs/mcp-go/server"
 )
+
+var (
+	// defaultRegistry 全局默认注册器，用于 init() 自动注册
+	defaultRegistry     *Registry
+	defaultRegistryOnce sync.Once
+	// pendingServices 暂存 init() 中注册的服务（此时 Registry 可能未配置）
+	pendingServices []MCPService
+	pendingMu       sync.Mutex
+)
+
+// DefaultRegistry 返回全局默认注册器
+func DefaultRegistry() *Registry {
+	defaultRegistryOnce.Do(func() {
+		defaultRegistry = NewRegistry()
+	})
+	return defaultRegistry
+}
+
+// SetDefaultRegistry 设置全局默认注册器（应在 main 中配置后调用）
+func SetDefaultRegistry(r *Registry) {
+	defaultRegistry = r
+	// 注册所有待处理的服务
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	for _, svc := range pendingServices {
+		if err := r.Register(svc); err != nil {
+			log.Printf("注册服务失败: %v", err)
+		}
+	}
+	pendingServices = nil
+}
+
+// Register 使用全局注册器注册服务（用于 init() 自动注册）
+func Register(svc MCPService) {
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	pendingServices = append(pendingServices, svc)
+}
+
+// MustRegister 注册服务，失败时 panic
+func MustRegister(svc MCPService) {
+	Register(svc)
+}
 
 // Registry 管理多个 MCP 服务的注册和路由。
 // 支持动态注册服务，每个服务通过独立的 HTTP 路径访问。

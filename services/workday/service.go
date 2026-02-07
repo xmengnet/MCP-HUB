@@ -13,6 +13,11 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// init 自动注册服务到全局注册器
+func init() {
+	mcpinternal.Register(NewService())
+}
+
 // Service 工作日 MCP 服务
 type Service struct {
 	calc      *holiday.WorkDayCalculator
