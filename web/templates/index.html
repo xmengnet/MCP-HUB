@@ -1,10 +1,37 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 
 <head>
-    <title>MCP 服务中心</title>
+    <title>MCP Hub</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="可扩展的 MCP 服务框架，轻松构建和托管多个 MCP 服务">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-primary: #FAF9F7;
+            --bg-sidebar: #F5F3F0;
+            --bg-card: #FFFFFF;
+            --bg-card-hover: #FBF9F6;
+            --accent: #C05621;
+            --accent-hover: #A8491C;
+            --accent-light: #FFF3EB;
+            --accent-badge: #E8DDD3;
+            --text-primary: #2D2A26;
+            --text-secondary: #6B6560;
+            --text-muted: #9C9590;
+            --border: rgba(45, 42, 38, 0.08);
+            --border-card: rgba(45, 42, 38, 0.06);
+            --shadow-sm: 0 1px 2px rgba(45, 42, 38, 0.04);
+            --shadow-md: 0 4px 12px rgba(45, 42, 38, 0.06);
+            --shadow-lg: 0 8px 24px rgba(45, 42, 38, 0.08);
+            --radius: 14px;
+            --radius-sm: 10px;
+            --sidebar-width: 240px;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -12,179 +39,447 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             min-height: 100vh;
-        }
-
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 20px;
-            text-align: center;
-        }
-
-        .header h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            opacity: 0.9;
-        }
-
-        .nav {
             display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-top: 20px;
         }
 
-        .nav a {
-            color: white;
-            text-decoration: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.2);
-            transition: background 0.2s;
+        /* ---- Sidebar ---- */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: var(--sidebar-width);
+            height: 100vh;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            z-index: 100;
         }
 
-        .nav a:hover {
-            background: rgba(255, 255, 255, 0.3);
-        }
-
-        .container {
-            max-width: 900px;
-            margin: 30px auto;
-            padding: 0 20px;
-        }
-
-        .status {
-            background: {
-                    {
-                    if .AuthEnabled
-                }
-            }
-
-            #fef3c7 {
-                    {
-                    else
-                }
-            }
-
-            #d1fae5 {
-                    {
-                    end
-                }
-            }
-
-            ;
-
-            color: {
-                    {
-                    if .AuthEnabled
-                }
-            }
-
-            #92400e {
-                    {
-                    else
-                }
-            }
-
-            #065f46 {
-                    {
-                    end
-                }
-            }
-
-            ;
-            padding: 15px 20px;
-            border-radius: 12px;
-            margin-bottom: 30px;
+        .sidebar-logo {
             display: flex;
             align-items: center;
             gap: 10px;
+            padding: 4px 8px;
+            margin-bottom: 32px;
+            text-decoration: none;
+            color: var(--text-primary);
         }
 
+        .sidebar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .sidebar-logo span {
+            font-weight: 700;
+            font-size: 16px;
+            letter-spacing: -0.3px;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+        }
+
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-nav a:hover {
+            background: rgba(45, 42, 38, 0.04);
+            color: var(--text-primary);
+        }
+
+        .sidebar-nav a.active {
+            color: var(--accent);
+            background: rgba(192, 86, 33, 0.06);
+        }
+
+        .sidebar-nav a .nav-icon {
+            width: 20px;
+            text-align: center;
+            font-size: 15px;
+        }
+
+        .sidebar-footer {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .sidebar-footer .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+            border-radius: var(--radius-sm);
+        }
+
+        .sidebar-footer .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+        }
+
+        .status-dot.secure {
+            background: #22C55E;
+        }
+
+        .status-dot.open {
+            background: #F59E0B;
+        }
+
+        .sidebar-footer a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            text-decoration: none;
+            font-size: 13px;
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-footer a:hover {
+            background: rgba(45, 42, 38, 0.04);
+            color: var(--text-primary);
+        }
+
+        /* ---- Main Content ---- */
+        .main {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 16px 40px;
+            gap: 16px;
+        }
+
+        .topbar-link {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.15s;
+        }
+
+        .topbar-link:hover {
+            color: var(--accent);
+        }
+
+        /* ---- Hero ---- */
+        .hero {
+            text-align: center;
+            padding: 48px 40px 32px;
+        }
+
+        .hero h1 {
+            font-size: 38px;
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+
+        .hero h1 .highlight {
+            color: var(--accent);
+        }
+
+        .hero p {
+            font-size: 16px;
+            color: var(--text-secondary);
+            max-width: 520px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* ---- Services Section ---- */
+        .section {
+            padding: 16px 40px 48px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.3px;
+        }
+
+        .section-link {
+            font-size: 13px;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: opacity 0.15s;
+        }
+
+        .section-link:hover {
+            opacity: 0.8;
+        }
+
+        /* ---- Service Cards ---- */
         .services-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 12px;
         }
 
-        .service {
-            background: white;
-            padding: 25px;
+        .service-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            transition: all 0.2s ease;
+            cursor: default;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .service-card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(45, 42, 38, 0.1);
+            box-shadow: var(--shadow-md);
+        }
+
+        .service-icon {
+            width: 44px;
+            height: 44px;
             border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            flex-shrink: 0;
         }
 
-        .service:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+        .service-icon.workday {
+            background: linear-gradient(135deg, #FDE8D8, #FBBF8A);
         }
 
-        .service h3 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 18px;
+        .service-icon.archlinux {
+            background: linear-gradient(135deg, #DBEAFE, #93B4F5);
         }
 
-        .service p {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 15px;
-            line-height: 1.5;
+        .service-icon.default {
+            background: linear-gradient(135deg, #E0E7FF, #A5B4FC);
         }
 
-        .service code {
-            display: block;
-            background: #f0f0f0;
-            padding: 10px;
-            border-radius: 6px;
+        .service-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .service-info h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            letter-spacing: -0.2px;
+        }
+
+        .service-info p {
             font-size: 13px;
-            color: #666;
-            word-break: break-all;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 10px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
+        .service-endpoint {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-primary);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .service-star {
+            color: #E6A94D;
+            font-size: 16px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        /* ---- Footer ---- */
         .footer {
             text-align: center;
-            padding: 30px;
-            color: #888;
-            font-size: 14px;
+            padding: 32px 40px;
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: auto;
+            border-top: 1px solid var(--border);
+        }
+
+        .footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .main {
+                margin-left: 0;
+            }
+
+            .hero {
+                padding: 32px 20px 24px;
+            }
+
+            .hero h1 {
+                font-size: 28px;
+            }
+
+            .section {
+                padding: 12px 20px 32px;
+            }
+
+            .services-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .topbar {
+                padding: 12px 20px;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div class="header">
-        <h1>🚀 MCP 服务中心</h1>
-        <p>Model Context Protocol 服务管理平台</p>
-        <div class="nav">
-            <a href="/playground">🎮 Playground</a>
-            {{if .AuthEnabled}}<a href="/logout">🚪 登出</a>{{end}}
-        </div>
-    </div>
-    <div class="container">
-        <div class="status">
-            {{if .AuthEnabled}}🔐 认证已启用{{else}}🔓 公开访问{{end}}
-        </div>
-        <div class="services-grid">
-            {{range .Services}}
-            <div class="service">
-                <h3>{{.Name}}</h3>
-                <p>{{.Description}}</p>
-                <code class="endpoint" data-path="{{.Path}}"></code>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <a class="sidebar-logo" href="/">
+            <div class="logo-icon">M</div>
+            <span>MCP Hub</span>
+        </a>
+        <nav class="sidebar-nav">
+            <a href="/" class="active">
+                <span class="nav-icon">🏠</span> Home
+            </a>
+            <a href="/playground">
+                <span class="nav-icon">⚡</span> Playground
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="status-badge">
+                {{if .AuthEnabled}}
+                <span class="status-dot secure"></span> 认证已启用
+                {{else}}
+                <span class="status-dot open"></span> 公开访问
+                {{end}}
             </div>
+            {{if .AuthEnabled}}
+            <a href="/logout">
+                <span class="nav-icon">🚪</span> 登出
+            </a>
             {{end}}
         </div>
-    </div>
-    <div class="footer">MCP Hub - Powered by Go</div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="topbar">
+            <a class="topbar-link" href="/playground">Playground →</a>
+        </div>
+
+        <div class="hero">
+            <h1>Your <span class="highlight">MCP</span><br>Service Hub</h1>
+            <p>可扩展的 Model Context Protocol 服务框架<br>轻松构建和托管多个 MCP 服务</p>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2 class="section-title">已注册服务</h2>
+                <a class="section-link" href="/playground">在 Playground 中测试 →</a>
+            </div>
+            <div class="services-grid">
+                {{range .Services}}
+                <div class="service-card">
+                    <div class="service-icon {{if eq .Path " /mcp/workday"}}workday{{else if eq .Path "/mcp/archlinux"
+                        }}archlinux{{else}}default{{end}}">
+                        {{if eq .Path "/mcp/workday"}}📅{{else if eq .Path "/mcp/archlinux"}}🐧{{else}}🔌{{end}}
+                    </div>
+                    <div class="service-info">
+                        <h3>{{.Name}}</h3>
+                        <p>{{.Description}}</p>
+                        <span class="service-endpoint" data-path="{{.Path}}"></span>
+                    </div>
+                    <span class="service-star">★</span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        <footer class="footer">
+            MCP Hub &mdash; Powered by <a href="https://go.dev" target="_blank">Go</a>
+        </footer>
+    </main>
+
     <script>
-        document.querySelectorAll('.endpoint').forEach(el => {
-            el.textContent = window.location.origin + el.dataset.path;
+        document.querySelectorAll('.service-endpoint').forEach(el => {
+            el.textContent = el.dataset.path;
         });
     </script>
 </body>
