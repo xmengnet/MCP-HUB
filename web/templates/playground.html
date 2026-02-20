@@ -232,6 +232,7 @@
         /* ---- Params Panel ---- */
         .params-panel {
             width: 380px;
+            flex-shrink: 0;
             background: var(--bg-card);
             border-right: 1px solid var(--border);
             display: flex;
@@ -352,6 +353,7 @@
         /* ---- Response Panel ---- */
         .response-panel {
             flex: 1;
+            min-width: 0;
             display: flex;
             flex-direction: column;
             background: #1A1917;
@@ -396,6 +398,7 @@
             font-size: 13px;
             color: #D4D0CC;
             white-space: pre-wrap;
+            word-break: break-all;
             line-height: 1.7;
         }
 

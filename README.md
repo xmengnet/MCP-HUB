@@ -9,6 +9,7 @@
 ## ✨ 特性
 
 - 🔌 **即插即用** - 简单接口，快速添加新服务
+- 🌐 **代理模式** - 通过配置文件接入外部 MCP Server，零编码
 - 🛤️ **路径路由** - 每个服务独立路径，互不干扰
 - 🔐 **API Key 认证** - 开箱即用的安全认证
 - 📝 **请求日志** - 内置请求日志中间件
@@ -27,7 +28,8 @@
 ### Docker Compose
 
 ```bash
-echo "API_KEYS=your-secret-key" > .env
+cp config.example.yaml config.yaml
+# 编辑 config.yaml 配置 API Key 和服务
 docker compose up -d
 ```
 
@@ -35,8 +37,11 @@ docker compose up -d
 
 ```bash
 go build -o mcp-hub ./cmd/server
-./mcp-hub -addr :8080 -api-keys "your-key"
+cp config.example.yaml config.yaml
+./mcp-hub -config config.yaml
 ```
+
+所有配置（监听地址、API Key、代理服务）统一在 `config.yaml` 中管理。
 
 ## 📖 MCP 调用指南
 
@@ -125,11 +130,50 @@ curl -X POST http://localhost:8080/mcp/workday \
 
 ## ⚙️ 配置
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `-addr` | 监听地址 | `:8080` |
-| `-api-keys` | API Key（逗号分隔） | 空 |
-| `-no-log` | 禁用日志 | `false` |
+所有配置统一在 `config.yaml` 中管理，也可通过命令行参数或环境变量覆盖。
+
+**优先级**: 命令行参数 > 配置文件 > 环境变量 > 默认值
+
+### 完整配置示例
+
+```yaml
+# config.yaml
+addr: ":8080"
+
+api_keys:
+  - "your-secret-key"
+
+no_log: false
+
+services:
+  - name: "文件系统"
+    description: "文件读写操作"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    path: "/mcp/filesystem"
+```
+
+### 配置字段说明
+
+| 字段 | 命令行 | 环境变量 | 说明 | 默认值 |
+|------|--------|---------|------|--------|
+| `addr` | `-addr` | `ADDR` | 监听地址 | `:8080` |
+| `api_keys` | `-api-keys` | `API_KEYS` | API Key 列表 | 空 |
+| `no_log` | `-no-log` | `NO_LOG` | 禁用请求日志 | `false` |
+| `services` | — | — | 外部 MCP 服务列表 | 空 |
+
+### 代理服务配置
+
+每个 `services` 条目定义一个通过 stdio 接入的外部 MCP Server：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | ✅ | 服务名称 |
+| `description` | ❌ | 服务描述 |
+| `command` | ✅ | 启动命令（如 `npx`、`python`、`node`） |
+| `args` | ❌ | 命令参数列表 |
+| `path` | ✅ | HTTP 路由路径，建议 `/mcp/<name>` 格式 |
+| `env` | ❌ | 传递给子进程的环境变量 |
 
 ---
 
@@ -139,18 +183,18 @@ curl -X POST http://localhost:8080/mcp/workday \
 
 ```
 mcp-hub/
-├── cmd/server/main.go      # 服务入口（空导入注册服务）
+├── cmd/server/main.go        # 服务入口
 ├── internal/
+│   ├── config/config.go      # 配置文件解析
 │   ├── mcp/
-│   │   ├── service.go      # MCPService 接口定义
-│   │   └── registry.go     # 服务注册器（含全局注册机制）
-│   └── middleware/
-│       └── middleware.go   # 认证/日志中间件
-├── pkg/                    # 公共库（可被服务复用）
-│   └── holiday/            # 节假日计算库
-├── services/               # MCP 服务实现
-│   └── workday/            # 工作日服务示例
-│       └── service.go
+│   │   ├── service.go        # MCPService 接口定义
+│   │   └── registry.go       # 服务注册器
+│   ├── middleware/
+│   │   └── middleware.go     # 认证/日志中间件
+│   └── proxy/proxy.go        # stdio 代理服务
+├── pkg/                      # 公共库
+├── services/                 # 内置 MCP 服务
+├── config.example.yaml       # 代理配置示例
 ├── Dockerfile
 └── docker-compose.yml
 ```

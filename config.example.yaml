@@ -1,0 +1,33 @@
+# MCP Hub 配置文件
+# 所有设置均可在此统一管理
+#
+# 使用方式:
+#   ./mcp-hub -config config.yaml
+#
+# 优先级: 命令行参数 > 配置文件 > 环境变量 > 默认值
+
+# 服务监听地址
+addr: ":8080"
+
+# API Key 认证（留空则不启用认证）
+api_keys:
+  # - "your-secret-key"
+
+# 禁用请求日志
+no_log: false
+
+# 外部 MCP 服务（通过 stdio 代理接入）
+services:
+  # 示例: 文件系统服务
+  # - name: "文件系统"
+  #   description: "文件读写操作"
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  #   path: "/mcp/filesystem"
+
+  # 示例: Everything 测试服务
+  # - name: "Everything"
+  #   description: "MCP 测试服务，包含各类测试工具"
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-everything"]
+  #   path: "/mcp/everything"

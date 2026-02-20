@@ -1,6 +1,9 @@
 # 二进制文件
 mcp-hub
 
+# 配置文件
+config.yaml
+
 # IDE
 .idea/
 .vscode/

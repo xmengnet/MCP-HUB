@@ -7,11 +7,11 @@ services:
       - "8080:8080"
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
     command:
-      - "-addr"
-      - ":8080"
-      - "-api-keys"
-      - "${API_KEYS:-}"
+      - "-config"
+      - "/app/config.yaml"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
       interval: 30s

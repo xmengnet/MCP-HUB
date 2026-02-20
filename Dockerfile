@@ -18,8 +18,8 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# 安装证书（用于 HTTPS 请求）
-RUN apk --no-cache add ca-certificates tzdata
+# 安装证书、时区和 Node.js（用于运行社区 MCP Server）
+RUN apk --no-cache add ca-certificates tzdata nodejs npm
 
 # 设置时区
 ENV TZ=Asia/Shanghai
