@@ -18,6 +18,46 @@ no_log: false
 
 # 外部 MCP 服务（通过 stdio 代理接入）
 services:
+  # ─── 内置服务：工作日计算 ────────────────────────────────────
+  # 查询中国节假日和工作日信息
+  - name: "工作日服务"
+    description: "中国节假日和工作日计算"
+    command: "./bin/workday-svc"
+    path: "/mcp/workday"
+    sandbox:
+      network:
+        enabled: true
+      env:
+        inherit: false
+        allow: ["PATH", "HOME"]
+
+  # ─── 内置服务：Arch Linux 包搜索 ─────────────────────────────
+  # 搜索 Arch Linux 官方仓库和 AUR 软件包
+  - name: "Arch Linux 搜索"
+    description: "Arch Linux 官方仓库和 AUR 软件包搜索"
+    command: "./bin/archlinux-svc"
+    path: "/mcp/archlinux"
+    sandbox:
+      network:
+        enabled: true
+      env:
+        inherit: false
+        allow: ["PATH", "HOME"]
+
+  # ─── 内置服务：代码执行沙箱 ──────────────────────────────────
+  # 在安全沙箱中执行 Python 代码，支持文本输出和 matplotlib 图表
+  - name: "代码执行沙箱"
+    description: "在安全沙箱中执行 Python 代码，支持文本输出和 matplotlib 图表"
+    command: "./bin/code-exec-svc"
+    path: "/mcp/code-exec"
+    sandbox:
+      network:
+        enabled: false
+      timeout: "60s"
+      env:
+        inherit: false
+        allow: ["PATH"]
+
   # ─── 示例: 文件系统服务（带沙箱配置） ──────────────────────────
   # 限制：只读文件系统、禁止联网、仅传递 PATH 和 HOME 环境变量
   # - name: "文件系统"
