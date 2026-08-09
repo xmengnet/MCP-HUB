@@ -110,7 +110,7 @@
         /* ---- Layout ---- */
         .container {
             display: grid;
-            grid-template-columns: 260px 1fr;
+            grid-template-columns: 280px 1fr;
             flex: 1;
             overflow: hidden;
         }
@@ -171,9 +171,13 @@
             line-height: 1.4;
         }
 
+        .service-item.active .desc {
+            opacity: 0.85;
+        }
+
         .tool-item {
-            padding: 8px 12px;
-            margin: 3px 0;
+            padding: 10px 12px;
+            margin: 4px 0;
             border-radius: 8px;
             cursor: pointer;
             font-size: 13px;
@@ -194,6 +198,23 @@
             border-color: var(--accent);
             background: var(--accent);
             color: white;
+        }
+
+        .tool-item .tool-item-name {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .tool-item .tool-item-desc {
+            font-size: 11px;
+            font-weight: 400;
+            margin-top: 4px;
+            line-height: 1.4;
+            opacity: 0.7;
+        }
+
+        .tool-item.active .tool-item-desc {
+            opacity: 0.85;
         }
 
         /* ---- Main Area ---- */
@@ -231,7 +252,7 @@
 
         /* ---- Params Panel ---- */
         .params-panel {
-            width: 380px;
+            width: 400px;
             flex-shrink: 0;
             background: var(--bg-card);
             border-right: 1px solid var(--border);
@@ -300,7 +321,8 @@
         }
 
         input.param-input,
-        select.param-input {
+        select.param-input,
+        textarea.param-input {
             width: 100%;
             padding: 10px 12px;
             border: 1px solid var(--border-strong);
@@ -314,9 +336,15 @@
         }
 
         input.param-input:focus,
-        select.param-input:focus {
+        select.param-input:focus,
+        textarea.param-input:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(192, 86, 33, 0.08);
+        }
+
+        textarea.param-input {
+            min-height: 80px;
+            resize: vertical;
         }
 
         .send-btn {
@@ -394,12 +422,27 @@
             flex: 1;
             overflow: auto;
             padding: 20px;
-            font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
             font-size: 13px;
             color: #D4D0CC;
+            line-height: 1.7;
+        }
+
+        .response-body .text-content {
+            font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
             white-space: pre-wrap;
             word-break: break-all;
-            line-height: 1.7;
+        }
+
+        .response-body .image-content {
+            margin: 12px 0;
+            max-width: 100%;
+        }
+
+        .response-body .image-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* ---- Empty State ---- */
@@ -415,56 +458,68 @@
         }
 
         .empty-state .icon {
-            font-size: 40px;
-            margin-bottom: 16px;
-            opacity: 0.6;
+            font-size: 48px;
+            margin-bottom: 20px;
+            opacity: 0.5;
         }
 
         .empty-state h3 {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 600;
             color: var(--text-secondary);
-            margin-bottom: 8px;
+            margin-bottom: 12px;
         }
 
         .empty-state p {
-            font-size: 13px;
-            line-height: 1.7;
+            font-size: 14px;
+            line-height: 1.8;
             color: var(--text-muted);
+            max-width: 360px;
         }
 
-        .empty-state ol {
-            text-align: left;
+        .empty-state .step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            padding: 8px 0;
+        }
+
+        .empty-state .step .num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent-light);
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
             font-size: 13px;
-            line-height: 2;
-            color: var(--text-muted);
-            padding-left: 20px;
+            flex-shrink: 0;
         }
 
         /* ---- Loading ---- */
         .loading {
             color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        .loading::after {
-            content: '';
-            animation: dots 1.5s infinite;
+        .loading .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
         }
 
-        @keyframes dots {
-
-            0%,
-            20% {
-                content: '.';
-            }
-
-            40% {
-                content: '..';
-            }
-
-            60%,
-            100% {
-                content: '...';
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
             }
         }
 
@@ -499,11 +554,11 @@
     <div class="container">
         <div class="sidebar">
             <div class="sidebar-section">
-                <h2>服务</h2>
+                <h2>📡 服务</h2>
                 <div id="services"></div>
             </div>
             <div class="sidebar-section" id="tools-section" style="display:none;">
-                <h2>工具</h2>
+                <h2>🔧 工具</h2>
                 <div id="tools"></div>
             </div>
         </div>
@@ -517,7 +572,7 @@
             <div class="content-area">
                 <div id="params-panel" class="params-panel" style="display:none;">
                     <div class="params-header">
-                        <h3>参数</h3>
+                        <h3>📋 参数</h3>
                     </div>
                     <div id="params-body" class="params-body"></div>
                     <button class="send-btn" id="send-btn" onclick="sendRequest()">
@@ -527,18 +582,25 @@
 
                 <div class="response-panel">
                     <div class="response-header">
-                        <h3>响应</h3>
+                        <h3>📤 响应</h3>
                         <span id="response-status" class="status" style="display:none;"></span>
                     </div>
                     <div id="response-body" class="response-body">
                         <div class="empty-state">
                             <div class="icon">⚡</div>
                             <h3>开始调试</h3>
-                            <ol>
-                                <li>从左侧选择一个服务</li>
-                                <li>选择要调用的工具</li>
-                                <li>填写参数并发送请求</li>
-                            </ol>
+                            <div class="step">
+                                <span class="num">1</span>
+                                <span>从左侧选择一个服务</span>
+                            </div>
+                            <div class="step">
+                                <span class="num">2</span>
+                                <span>选择要调用的工具</span>
+                            </div>
+                            <div class="step">
+                                <span class="num">3</span>
+                                <span>填写参数并发送请求</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -547,7 +609,7 @@
     </div>
 
     <script>
-        const services = {{.ServicesJSON }};
+        const services = {{.ServicesJSON}};
         let currentService = null;
         let currentTool = null;
         let tools = [];
@@ -557,7 +619,7 @@
         services.forEach((svc, i) => {
             const div = document.createElement('div');
             div.className = 'service-item';
-            div.innerHTML = `<div>${svc.name}</div><div class="desc">${svc.description}</div>`;
+            div.innerHTML = `<div>${svc.name}</div><div class="desc">${svc.description || '无描述'}</div>`;
             div.onclick = () => selectService(i);
             servicesEl.appendChild(div);
         });
@@ -572,12 +634,23 @@
             });
             document.getElementById('tool-header').style.display = 'none';
             document.getElementById('params-panel').style.display = 'none';
+            document.getElementById('response-body').innerHTML = `
+                <div class="empty-state">
+                    <div class="icon">🔧</div>
+                    <h3>选择工具</h3>
+                    <div class="step">
+                        <span class="num">2</span>
+                        <span>从左侧工具列表选择一个工具</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('response-status').style.display = 'none';
 
             // 获取工具列表
             const toolsSection = document.getElementById('tools-section');
             const toolsEl = document.getElementById('tools');
             toolsSection.style.display = 'block';
-            toolsEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px;">加载中...</div>';
+            toolsEl.innerHTML = '<div class="loading" style="padding:12px;"><div class="spinner"></div> 加载中...</div>';
 
             try {
                 const resp = await fetch(currentService.path, {
@@ -589,7 +662,7 @@
                 tools = data.result?.tools || [];
 
                 if (tools.length === 0) {
-                    toolsEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px;">无可用工具</div>';
+                    toolsEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px;">无可用工具</div>';
                     return;
                 }
 
@@ -597,12 +670,20 @@
                 tools.forEach((tool, i) => {
                     const div = document.createElement('div');
                     div.className = 'tool-item';
-                    div.textContent = tool.name;
+                    div.innerHTML = `
+                        <div class="tool-item-name">${tool.name}</div>
+                        <div class="tool-item-desc">${tool.description || '无描述'}</div>
+                    `;
                     div.onclick = () => selectTool(i);
                     toolsEl.appendChild(div);
                 });
+
+                // 自动选中第一个工具
+                if (tools.length > 0) {
+                    selectTool(0);
+                }
             } catch (e) {
-                toolsEl.innerHTML = '<div style="color:#DC2626;font-size:13px;padding:8px;">加载失败</div>';
+                toolsEl.innerHTML = '<div style="color:#DC2626;font-size:13px;padding:12px;">加载失败: ' + e.message + '</div>';
             }
         }
 
@@ -629,7 +710,7 @@
             const required = schema?.required || [];
 
             if (Object.keys(properties).length === 0) {
-                paramsBody.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:24px;">此工具不需要参数</div>';
+                paramsBody.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:24px;">此工具不需要参数，直接发送即可</div>';
             } else {
                 paramsBody.innerHTML = '';
                 for (const [name, prop] of Object.entries(properties)) {
@@ -651,6 +732,9 @@
                         </select>`;
                     } else if (prop.type === 'integer' || prop.type === 'number') {
                         inputHTML = `<input class="param-input" type="number" id="param-${name}" placeholder="输入${prop.type === 'integer' ? '整数' : '数字'}" ${isRequired ? 'required' : ''}>`;
+                    } else if (name === 'code' || name === 'query' || name === 'sql') {
+                        // 长文本用 textarea
+                        inputHTML = `<textarea class="param-input" id="param-${name}" placeholder="${prop.description || '请输入'}" ${isRequired ? 'required' : ''} rows="6"></textarea>`;
                     } else {
                         inputHTML = `<input class="param-input" type="text" id="param-${name}" placeholder="${prop.default ? '默认: ' + prop.default : '请输入'}" ${isRequired ? 'required' : ''}>`;
                     }
@@ -671,7 +755,7 @@
 
         async function sendRequest() {
             if (!currentService || !currentTool) {
-                alert('请先选择服务和工具');
+                showResponse([{ type: 'text', text: '请先选择服务和工具' }], false);
                 return;
             }
 
@@ -696,14 +780,10 @@
                 }
             }
 
-            const responseBody = document.getElementById('response-body');
-            const responseStatus = document.getElementById('response-status');
             const sendBtn = document.getElementById('send-btn');
-
             sendBtn.disabled = true;
-            sendBtn.textContent = '请求中...';
-            responseBody.innerHTML = '<span class="loading">正在请求</span>';
-            responseStatus.style.display = 'none';
+            sendBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-color:rgba(255,255,255,0.3);border-top-color:white;"></div> 请求中...';
+            document.getElementById('response-status').style.display = 'none';
 
             try {
                 const resp = await fetch(currentService.path, {
@@ -718,31 +798,49 @@
                 });
                 const data = await resp.json();
 
-                responseStatus.style.display = 'inline-block';
-
                 if (data.error) {
-                    responseStatus.className = 'status error';
-                    responseStatus.textContent = '错误';
-                    responseBody.textContent = JSON.stringify(data.error, null, 2);
+                    showResponse([{ type: 'text', text: JSON.stringify(data.error, null, 2) }], false);
                 } else {
-                    responseStatus.className = 'status success';
-                    responseStatus.textContent = '成功';
-
-                    if (data.result?.content?.[0]?.text) {
-                        responseBody.textContent = data.result.content[0].text;
-                    } else {
-                        responseBody.textContent = JSON.stringify(data.result, null, 2);
-                    }
+                    showResponse(data.result?.content || [], true);
                 }
             } catch (e) {
-                responseStatus.style.display = 'inline-block';
-                responseStatus.className = 'status error';
-                responseStatus.textContent = '错误';
-                responseBody.textContent = '请求失败: ' + e.message;
+                showResponse([{ type: 'text', text: '请求失败: ' + e.message }], false);
             } finally {
                 sendBtn.disabled = false;
-                sendBtn.textContent = '▶ 发送请求';
+                sendBtn.innerHTML = '▶ 发送请求';
             }
+        }
+
+        function showResponse(content, isSuccess) {
+            const responseBody = document.getElementById('response-body');
+            const responseStatus = document.getElementById('response-status');
+
+            responseStatus.style.display = 'inline-block';
+            responseStatus.className = isSuccess ? 'status success' : 'status error';
+            responseStatus.textContent = isSuccess ? '成功' : '错误';
+
+            if (!content || content.length === 0) {
+                responseBody.innerHTML = '<div class="text-content">(无返回内容)</div>';
+                return;
+            }
+
+            let html = '';
+            for (const item of content) {
+                if (item.type === 'image' && item.data) {
+                    html += `<div class="image-content"><img src="data:${item.mimeType || 'image/png'};base64,${item.data}" alt="图片输出"></div>`;
+                } else if (item.type === 'text') {
+                    html += `<div class="text-content">${escapeHtml(item.text)}</div>`;
+                } else {
+                    html += `<div class="text-content">${escapeHtml(JSON.stringify(item, null, 2))}</div>`;
+                }
+            }
+            responseBody.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
     </script>
 </body>

@@ -8,13 +8,15 @@
 
 ## ✨ 特性
 
-- 🔌 **即插即用** - 简单接口，快速添加新服务
+- 🔌 **即插即用** - 服务独立为二进制，通过 stdio 代理接入，零代码耦合
+- 🔒 **沙箱安全隔离** - 每个服务可独立配置环境变量白名单、网络控制、文件系统权限
+- 💻 **代码执行沙箱** - 内置安全的 Python 代码执行环境，支持 matplotlib 图表输出
 - 🌐 **代理模式** - 通过配置文件接入外部 MCP Server，零编码
 - 🛤️ **路径路由** - 每个服务独立路径，互不干扰
 - 🔐 **API Key 认证** - 开箱即用的安全认证
 - 📝 **请求日志** - 内置请求日志中间件
-- 🐳 **Docker 支持** - 一键容器化部署
-- 🧩 **Init 自动注册** - 空导入即可注册，无需修改 main 函数
+- 🐳 **Docker 支持** - 一键容器化部署，多架构镜像 (amd64 + arm64)
+- 🔄 **CI/CD 自动构建** - 每次提交自动构建测试，打 tag 自动发布到 GHCR
 
 ## 内置服务
 
@@ -22,8 +24,23 @@
 |------|------|------|
 | 工作日服务 | `/mcp/workday` | 中国节假日和工作日计算 |
 | Arch Linux 服务 | `/mcp/archlinux` | 官方仓库和 AUR 软件包搜索 |
+| 代码执行沙箱 | `/mcp/code-exec` | 安全的 Python 代码执行环境 |
 
 ## 🚀 快速开始
+
+### 本地运行
+
+```bash
+# 1. 编译所有二进制
+make build
+
+# 2. 复制配置
+cp config.example.yaml config.yaml
+# 编辑 config.yaml 配置 API Key 和服务
+
+# 3. 启动
+./bin/mcp-server -config config.yaml
+```
 
 ### Docker Compose
 
@@ -33,15 +50,20 @@ cp config.example.yaml config.yaml
 docker compose up -d
 ```
 
-### 本地运行
+### Docker 单次运行
 
 ```bash
-go build -o mcp-hub ./cmd/server
-cp config.example.yaml config.yaml
-./mcp-hub -config config.yaml
+docker build -t mcp-hub .
+docker run -d --name mcp-hub -p 8080:8080 \
+  -v ./config.yaml:/app/config.yaml:ro \
+  mcp-hub:latest
 ```
 
-所有配置（监听地址、API Key、代理服务）统一在 `config.yaml` 中管理。
+### 从 GHCR 拉取
+
+```bash
+docker pull ghcr.io/liyp/mcp-hub:latest
+```
 
 ## 📖 MCP 调用指南
 
@@ -118,6 +140,19 @@ curl -X POST http://localhost:8080/mcp/workday \
 - `source`: `official`（官方仓库）、`aur`、`all`（默认）
 - `repo`: 指定仓库，如 `core`, `extra`, `multilib`
 
+## 💻 代码执行沙箱工具
+
+| 工具 | 参数 | 描述 |
+|------|------|------|
+| `execute_python` | `code`, `timeout?` | 在安全沙箱中执行 Python 代码 |
+
+**安全限制:**
+- 禁止 `subprocess`, `ctypes`, `shutil`, `socket` 等危险模块
+- 禁止 `os.system`, `os.popen`, `os.fork` 等系统调用
+- 文件写入限制在临时目录内
+- 支持 `matplotlib` 图表输出（base64 PNG 嵌入响应）
+- 可配置超时时间（默认 30 秒）
+
 ## 🔐 认证
 
 ```bash
@@ -146,11 +181,39 @@ api_keys:
 no_log: false
 
 services:
+  - name: "工作日服务"
+    command: "./bin/workday-svc"
+    path: "/mcp/workday"
+    sandbox:
+      network:
+        enabled: true
+      env:
+        inherit: false
+        allow: ["PATH", "HOME"]
+
+  - name: "代码执行沙箱"
+    command: "./bin/code-exec-svc"
+    path: "/mcp/code-exec"
+    sandbox:
+      network:
+        enabled: false
+      timeout: "60s"
+      env:
+        inherit: false
+        allow: ["PATH"]
+
   - name: "文件系统"
-    description: "文件读写操作"
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     path: "/mcp/filesystem"
+    sandbox:
+      network:
+        enabled: false
+      fs:
+        mode: "read-only"
+      env:
+        inherit: false
+        allow: ["PATH", "HOME"]
 ```
 
 ### 配置字段说明
@@ -170,7 +233,7 @@ services:
 |------|------|------|
 | `name` | ✅ | 服务名称 |
 | `description` | ❌ | 服务描述 |
-| `command` | ✅ | 启动命令（如 `npx`、`python`、`node`） |
+| `command` | ✅ | 启动命令（如 `npx`、`./bin/workday-svc`） |
 | `args` | ❌ | 命令参数列表 |
 | `path` | ✅ | HTTP 路由路径，建议 `/mcp/<name>` 格式 |
 | `env` | ❌ | 传递给子进程的环境变量 |
@@ -216,33 +279,102 @@ services:
 
 ---
 
-## �️ 开发指南
+## 构建系统
 
-### 项目结构
+使用 Makefile 一键构建所有二进制：
+
+```bash
+make build              # 构建全部
+make build/server       # 仅构建主服务
+make build/workday-svc  # 仅构建工作日服务
+make build/code-exec-svc
+make clean              # 清理构建产物
+make list               # 列出所有可构建的二进制
+```
+
+Makefile 自动发现 `services/*/cmd/*/main.go`，新增服务无需修改构建配置。
+
+## 🔄 CI/CD
+
+项目使用 GitHub Actions 自动构建和发布：
+
+- **每次提交** → 自动构建 + 测试 + lint
+- **打 `v*` tag** → 构建多架构 Docker 镜像 (amd64 + arm64) 并推送到 GHCR
+
+```bash
+# 打 tag 发布
+git tag v1.0.0
+git push origin v1.0.0
+
+# 拉取镜像
+docker pull ghcr.io/liyp/mcp-hub:latest
+```
+
+## 🐳 Docker 多目标构建
+
+Dockerfile 支持多目标构建，可以选择构建特定服务镜像：
+
+```bash
+# 构建全部（默认）
+docker build -t mcp-hub .
+
+# 构建特定目标
+docker build --target server -t mcp-hub-server .
+docker build --target code-exec-svc-builder -t code-exec-svc .
+```
+
+---
+
+## 📁 项目结构
 
 ```
 mcp-hub/
-├── cmd/server/main.go        # 服务入口
+├── cmd/server/main.go        # 服务入口（不硬编码任何服务）
 ├── internal/
 │   ├── config/config.go      # 配置文件解析
+│   ├── config/sandbox.go     # 沙箱配置类型
 │   ├── mcp/
 │   │   ├── service.go        # MCPService 接口定义
-│   │   └── registry.go       # 服务注册器
+│   │   └── registry.go       # 服务注册器 + HTTP 路由 + Web 页面
 │   ├── middleware/
 │   │   └── middleware.go     # 认证/日志中间件
-│   └── proxy/proxy.go        # stdio 代理服务
+│   └── proxy/proxy.go        # stdio 代理服务（含沙箱隔离）
 ├── pkg/                      # 公共库
-├── services/                 # 内置 MCP 服务
-├── config.example.yaml       # 代理配置示例
-├── Dockerfile
-└── docker-compose.yml
+│   ├── holiday/              # 中国节假日计算
+│   └── archlinux/            # Arch Linux 包搜索客户端
+├── services/                 # 独立 MCP 服务二进制
+│   ├── workday/              # 工作日服务
+│   │   ├── cmd/workday-svc/  # 独立入口
+│   │   └── service.go
+│   ├── archlinux/            # Arch Linux 服务
+│   │   ├── cmd/archlinux-svc/
+│   │   └── service.go
+│   └── code-exec/            # 代码执行沙箱
+│       ├── cmd/code-exec-svc/
+│       ├── service.go
+│       ├── executor.go
+│       └── restrictions.go
+├── web/                      # Web 前端模板
+│   ├── templates/
+│   │   ├── index.html
+│   │   ├── login.html
+│   │   └── playground.html
+│   └── embed.go
+├── Makefile                  # 一键构建系统
+├── Dockerfile                # 多目标多阶段构建
+├── docker-compose.yml
+├── .github/workflows/ci.yml  # CI/CD 流水线
+├── config.example.yaml
+└── go.mod
 ```
+
+## 🧩 开发指南
 
 ### 添加新服务
 
 只需 **2 步**：
 
-#### 1. 创建服务文件
+#### 1. 创建服务代码
 
 在 `services/` 下创建新目录和 `service.go`：
 
@@ -251,94 +383,51 @@ mcp-hub/
 package weather
 
 import (
-    mcpinternal "mcp-hub/internal/mcp"
     "github.com/mark3labs/mcp-go/mcp"
     "github.com/mark3labs/mcp-go/server"
 )
 
-// init 自动注册到全局注册器
-func init() {
-    mcpinternal.Register(NewService())
-}
-
-type Service struct {
-    mcpServer *server.MCPServer
-}
-
-func NewService() mcpinternal.MCPService {
-    svc := &Service{}
-    svc.mcpServer = server.NewMCPServer(
-        "weather-service",
-        "1.0.0",
+func NewService() *server.MCPServer {
+    s := server.NewMCPServer(
+        "weather-service", "1.0.0",
         server.WithToolCapabilities(false),
         server.WithRecovery(),
     )
-    svc.registerTools()
-    return svc
+    s.AddTool(mcp.NewTool("get_weather",
+        mcp.WithDescription("查询城市天气"),
+        mcp.WithString("city", mcp.Required(), mcp.Description("城市名称")),
+    ), handleGetWeather)
+    return s
 }
-
-func (s *Service) Name() string        { return "天气服务" }
-func (s *Service) Path() string        { return "/mcp/weather" }
-func (s *Service) Description() string { return "天气查询服务" }
-func (s *Service) MCPServer() *server.MCPServer { return s.mcpServer }
-
-func (s *Service) registerTools() {
-    s.mcpServer.AddTool(
-        mcp.NewTool("get_weather",
-            mcp.WithDescription("查询城市天气"),
-            mcp.WithString("city", mcp.Required(), mcp.Description("城市名称")),
-        ),
-        s.handleGetWeather,
-    )
-}
-
-// ... 实现工具处理函数
 ```
 
-#### 2. 添加空导入
-
-在 `cmd/server/main.go` 添加一行导入：
+#### 2. 创建独立入口
 
 ```go
+// services/weather/cmd/weather-svc/main.go
+package main
+
 import (
-    // ...
-    _ "mcp-hub/services/workday"
-    _ "mcp-hub/services/weather"  // 新增这一行
+    "mcp-hub/services/weather"
+    "github.com/mark3labs/mcp-go/server"
 )
-```
 
-#### 3. 编译运行
-
-```bash
-go build -o mcp-hub ./cmd/server
-./mcp-hub
-```
-
-### MCPService 接口
-
-```go
-type MCPService interface {
-    Name() string                    // 服务名称（日志显示）
-    Path() string                    // HTTP 路径（如 /mcp/weather）
-    Description() string             // 服务描述
-    MCPServer() *server.MCPServer    // MCP 服务器实例
+func main() {
+    server.ServeStdio(weather.NewService())
 }
 ```
 
-### 注册机制说明
+#### 3. 添加到配置
 
-项目使用 **Init 自动注册模式**：
+```yaml
+# config.yaml
+services:
+  - name: "天气服务"
+    command: "./bin/weather-svc"
+    path: "/mcp/weather"
+```
 
-1. 每个服务包的 `init()` 函数调用 `mcp.Register()` 注册服务
-2. 服务暂存在 `pendingServices` 切片中
-3. `main()` 创建 Registry 后调用 `SetDefaultRegistry()`
-4. 所有待处理服务自动注册到 Registry
-
-这种模式的优点：
-- ✅ 添加服务只需空导入一行
-- ✅ 无需修改 main 函数逻辑
-- ✅ 跨平台兼容
-- ✅ 编译时类型检查
+**无需修改任何 Go 代码**，Makefile 会自动发现新服务。
 
 ### 开发规范
 
