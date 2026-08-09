@@ -168,6 +168,7 @@ func (r *Registry) Start(addr string) error {
 	r.addr = addr
 
 	// 添加页面路由
+	r.mux.HandleFunc("/health", r.handleHealth)
 	r.mux.HandleFunc("/", r.handleIndex)
 	r.mux.HandleFunc("/login", r.handleLogin)
 	r.mux.HandleFunc("/logout", r.handleLogout)
@@ -193,6 +194,15 @@ func (r *Registry) Start(addr string) error {
 	}
 
 	return http.ListenAndServe(addr, r.Handler())
+}
+
+// handleHealth 处理健康检查请求
+func (r *Registry) handleHealth(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "ok",
+		"services": len(r.services),
+	})
 }
 
 // handleIndex 处理根路径请求，显示服务列表

@@ -174,6 +174,45 @@ services:
 | `args` | ❌ | 命令参数列表 |
 | `path` | ✅ | HTTP 路由路径，建议 `/mcp/<name>` 格式 |
 | `env` | ❌ | 传递给子进程的环境变量 |
+| `sandbox` | ❌ | 沙箱权限配置（见下方） |
+
+### 沙箱配置（Sandbox）
+
+通过 `sandbox` 字段控制每个代理服务的权限，不配置则默认无限制。
+
+```yaml
+services:
+  - name: "文件系统"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    path: "/mcp/filesystem"
+    sandbox:
+      network:
+        enabled: false              # 禁止联网
+      fs:
+        mode: "read-only"           # 只读文件系统
+      env:
+        inherit: false              # 不继承宿主环境变量
+        allow: ["PATH", "HOME"]     # 只传递白名单内的变量
+      timeout: "30s"                # 每次请求超时
+```
+
+#### 沙箱字段说明
+
+| 字段 | 子字段 | 说明 | 默认值 |
+|------|--------|------|--------|
+| `network` | `enabled` | 是否允许联网 | `false`（禁止联网） |
+| | `egress` | 出站白名单地址列表 | 空 |
+| `fs` | `mode` | 文件系统模式：`read-only` / `whitelist` / `full` | `full` |
+| | `read_write` | 读写白名单路径（mode=whitelist 时有效） | 空 |
+| | `read_only` | 只读白名单路径（mode=whitelist 时有效） | 空 |
+| `env` | `inherit` | 是否继承宿主环境变量 | `false` |
+| | `allow` | 环境变量白名单 | 空 |
+| `timeout` | — | 每次请求超时时间，如 `"30s"` | 无限制 |
+| `memory` | — | 内存上限，如 `"256MB"`（需系统支持） | 无限制 |
+| `private_tmp` | — | 是否使用独立临时目录 | `false` |
+
+> **安全建议**: 对于来源不明的第三方服务，建议设置 `sandbox.env.inherit: false` 并只允许 `PATH` 和 `HOME`，防止 SSH 密钥、API Token 等敏感环境变量泄露。
 
 ---
 

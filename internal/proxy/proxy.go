@@ -5,12 +5,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"mcp-hub/internal/config"
 	mcpinternal "mcp-hub/internal/mcp"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -22,24 +26,44 @@ type ProxyService struct {
 	path        string
 	mcpServer   *server.MCPServer
 	mcpClient   *client.Client
+	sandbox     *config.SandboxConfig
 }
 
 // NewProxyService 根据配置创建代理服务
-// 1. 启动子进程并建立 stdio 连接
-// 2. 初始化 MCP 握手
-// 3. 获取远程工具列表
-// 4. 将远程工具注册到本地 MCPServer（handler 透传调用）
+// 1. 应用沙箱配置（环境变量过滤等）
+// 2. 启动子进程并建立 stdio 连接
+// 3. 初始化 MCP 握手
+// 4. 获取远程工具列表
+// 5. 将远程工具注册到本地 MCPServer（handler 透传调用）
 func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
-	// 构建环境变量列表
-	var env []string
-	for k, v := range cfg.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	// 构建并过滤环境变量列表
+	env := buildEnv(cfg.Env, cfg.Sandbox)
+
+	// 使用自定义 CommandFunc 来精确控制子进程环境变量
+	// 原因: mcp-go 默认的 cmd.Env = append(os.Environ(), env...) 会把宿主环境全部传进去
+	// 我们的自定义函数会用 buildEnv 的结果完全替换，实现真正的环境隔离
+	cmdFunc := func(ctx context.Context, command string, cmdEnv []string, args []string) (*exec.Cmd, error) {
+		cmd := exec.CommandContext(ctx, command, args...)
+		cmd.Env = cmdEnv
+		return cmd, nil
 	}
 
-	// 启动子进程
-	mcpClient, err := client.NewStdioMCPClient(cfg.Command, env, cfg.Args...)
+	// 启动子进程（使用自定义 CommandFunc）
+	mcpClient, err := client.NewStdioMCPClientWithOptions(
+		cfg.Command, env, cfg.Args,
+		transport.WithCommandFunc(cmdFunc),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("启动子进程失败 (%s): %w", cfg.Command, err)
+	}
+
+	// 打印沙箱配置信息
+	if cfg.Sandbox != nil {
+		log.Printf("  🔒 沙箱: 网络=%v 文件=%s 环境变量=%d个 超时=%s",
+			cfg.Sandbox.Network != nil && cfg.Sandbox.Network.Enabled,
+			sandboxFSMode(cfg.Sandbox.FS),
+			len(env),
+			cfg.Sandbox.Timeout)
 	}
 
 	// 初始化握手
@@ -74,6 +98,7 @@ func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
 		path:        cfg.Path,
 		mcpServer:   mcpServer,
 		mcpClient:   mcpClient,
+		sandbox:     cfg.Sandbox,
 	}
 
 	// 获取远程工具并注册到本地
@@ -83,6 +108,67 @@ func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
 	}
 
 	return svc, nil
+}
+
+// buildEnv 构建环境变量列表，并根据沙箱配置过滤
+// 沙箱规则:
+//   - sandbox.Env.Inherit=false（默认）: 不继承宿主环境，只传递 Env 白名单 + 配置中显式设置的 env
+//   - sandbox.Env.Inherit=true: 继承宿主环境，额外保留 Env.Allow 白名单
+func buildEnv(cfgEnv map[string]string, sandbox *config.SandboxConfig) []string {
+	// 先收集配置中显式指定的环境变量
+	var explicit []string
+	for k, v := range cfgEnv {
+		explicit = append(explicit, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// 没有沙箱配置，直接返回显式变量（继承宿主全部环境变量）
+	if sandbox == nil || sandbox.Env == nil {
+		return explicit
+	}
+
+	envConfig := sandbox.Env
+
+	// 如果不继承宿主环境
+	if !envConfig.Inherit {
+		// 只传递白名单 + 显式配置的变量
+		var filtered []string
+		filtered = append(filtered, explicit...)
+
+		// 从宿主环境读取白名单变量
+		for _, key := range envConfig.Allow {
+			if val := os.Getenv(key); val != "" {
+				// 避免被显式变量覆盖
+				if _, exists := cfgEnv[key]; !exists {
+					filtered = append(filtered, fmt.Sprintf("%s=%s", key, val))
+				}
+			}
+		}
+		return filtered
+	}
+
+	// 继承宿主环境，但只保留白名单
+	hostEnv := os.Environ()
+	if len(envConfig.Allow) == 0 {
+		return explicit
+	}
+
+	allowSet := make(map[string]bool, len(envConfig.Allow))
+	for _, k := range envConfig.Allow {
+		allowSet[k] = true
+	}
+
+	var filtered []string
+	filtered = append(filtered, explicit...)
+	for _, entry := range hostEnv {
+		key := strings.SplitN(entry, "=", 2)[0]
+		if allowSet[key] {
+			// 避免被显式变量覆盖
+			if _, exists := cfgEnv[key]; !exists {
+				filtered = append(filtered, entry)
+			}
+		}
+	}
+	return filtered
 }
 
 // syncTools 从远程服务获取工具列表并注册到本地 MCPServer
@@ -107,10 +193,24 @@ func (s *ProxyService) syncTools() error {
 }
 
 // makeToolHandler 创建一个将请求透传到远程服务的 handler
+// 如果配置了超时，会在 context 上附加超时控制
 func (s *ProxyService) makeToolHandler(toolName string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := s.mcpClient.CallTool(ctx, req)
+		// 应用超时控制
+		execCtx := ctx
+		if s.sandbox != nil && s.sandbox.Timeout != "" {
+			if timeout, err := time.ParseDuration(s.sandbox.Timeout); err == nil && timeout > 0 {
+				var cancel context.CancelFunc
+				execCtx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+		}
+
+		result, err := s.mcpClient.CallTool(execCtx, req)
 		if err != nil {
+			if execCtx.Err() == context.DeadlineExceeded {
+				return mcp.NewToolResultError(fmt.Sprintf("工具 %q 调用超时 (%s)", toolName, s.sandbox.Timeout)), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("代理调用失败: %v", err)), nil
 		}
 		return result, nil
@@ -130,6 +230,14 @@ func (s *ProxyService) Close() error {
 		return s.mcpClient.Close()
 	}
 	return nil
+}
+
+// sandboxFSMode 返回文件系统沙箱模式的可读字符串
+func sandboxFSMode(fs *config.FSConfig) string {
+	if fs == nil || fs.Mode == "" {
+		return "full"
+	}
+	return fs.Mode
 }
 
 // LoadAll 从配置加载所有代理服务并注册到 Registry

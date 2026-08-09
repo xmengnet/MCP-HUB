@@ -26,7 +26,7 @@ func DefaultAuthConfig() AuthConfig {
 		APIKeys:      []string{},
 		Enabled:      false,
 		HeaderName:   "X-API-Key",
-		ExcludePaths: []string{"/login", "/logout"}, // 登录相关页面不需要认证
+		ExcludePaths: []string{"/health", "/login", "/logout"}, // 健康检查和登录页面不需要认证
 	}
 }
 

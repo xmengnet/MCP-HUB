@@ -18,16 +18,72 @@ no_log: false
 
 # 外部 MCP 服务（通过 stdio 代理接入）
 services:
-  # 示例: 文件系统服务
+  # ─── 示例: 文件系统服务（带沙箱配置） ──────────────────────────
+  # 限制：只读文件系统、禁止联网、仅传递 PATH 和 HOME 环境变量
   # - name: "文件系统"
   #   description: "文件读写操作"
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
   #   path: "/mcp/filesystem"
+  #   sandbox:
+  #     network:
+  #       enabled: false              # 禁止联网
+  #     fs:
+  #       mode: "read-only"           # 只读文件系统
+  #     env:
+  #       inherit: false              # 不继承宿主环境变量
+  #       allow: ["PATH", "HOME"]     # 只传递白名单变量
 
-  # 示例: Everything 测试服务
+  # ─── 示例: Everything 测试服务（带沙箱配置） ──────────────────
   # - name: "Everything"
   #   description: "MCP 测试服务，包含各类测试工具"
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-everything"]
   #   path: "/mcp/everything"
+  #   sandbox:
+  #     env:
+  #       inherit: false
+  #       allow: ["PATH", "HOME", "USER"]
+
+  # ─── 示例: 数据库查询服务（带超时和环境变量白名单） ──────────
+  # - name: "数据库"
+  #   description: "PostgreSQL 数据库查询"
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-postgres"]
+  #   path: "/mcp/postgres"
+  #   sandbox:
+  #     fs:
+  #       mode: "read-only"           # 只读，防止写文件
+  #     network:
+  #       enabled: true               # 需要联网访问数据库
+  #     env:
+  #       inherit: false
+  #       allow: ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]
+  #     timeout: "30s"                # 每次请求超时
+
+  # ─── 示例: 不受信任的第三方服务（严格限制） ──────────────────
+  # - name: "未知插件"
+  #   description: "来源不明的第三方服务"
+  #   command: "npx"
+  #   args: ["-y", "some-random-package"]
+  #   path: "/mcp/unknown"
+  #   sandbox:
+  #     fs:
+  #       mode: "read-only"
+  #     network:
+  #       enabled: false
+  #     env:
+  #       inherit: false
+  #       allow: ["PATH", "HOME"]
+  #     timeout: "10s"
+  #     memory: "64MB"                # 内存上限（需系统支持）
+
+  # ─── 示例: 信任的服务（不配置沙箱，默认无限制） ──────────────
+  # - name: "我的服务"
+  #   description: "自定义 Python MCP 服务"
+  #   command: "python"
+  #   args: ["-m", "my_mcp_server"]
+  #   path: "/mcp/myservice"
+  #   env:
+  #     PYTHONPATH: "/opt/mcp"
+  #   # 不写 sandbox，默认无限制

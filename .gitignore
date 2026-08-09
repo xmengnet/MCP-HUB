@@ -10,6 +10,7 @@ config.yaml
 *.swp
 *.swo
 *~
+.zcode
 
 # OS
 .DS_Store

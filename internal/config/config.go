@@ -34,6 +34,8 @@ type ServiceConfig struct {
 	Path string `yaml:"path"`
 	// Env 环境变量
 	Env map[string]string `yaml:"env"`
+	// Sandbox 沙箱权限配置（nil 表示无限制）
+	Sandbox *SandboxConfig `yaml:"sandbox,omitempty"`
 }
 
 // Load 从文件加载配置
