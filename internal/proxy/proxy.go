@@ -66,9 +66,9 @@ func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
 			cfg.Sandbox.Timeout)
 	}
 
-	// 初始化握手
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// 初始化握手（npx 首次下载包可能较慢，给 120 秒超时）
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
 
 	_, err = mcpClient.Initialize(ctx, mcp.InitializeRequest{
 		Params: mcp.InitializeParams{
@@ -240,7 +240,7 @@ func sandboxFSMode(fs *config.FSConfig) string {
 	return fs.Mode
 }
 
-// LoadAll 从配置加载所有代理服务并注册到 Registry
+// LoadAll 从配置加载所有代理服务并注册到 Registry（同步）
 func LoadAll(cfg *config.Config, registry *mcpinternal.Registry) ([]*ProxyService, error) {
 	var proxies []*ProxyService
 
@@ -263,4 +263,29 @@ func LoadAll(cfg *config.Config, registry *mcpinternal.Registry) ([]*ProxyServic
 	}
 
 	return proxies, nil
+}
+
+// LoadAllAsync 异步加载所有代理服务，每加载完成一个回调一次
+// 服务器可先启动，服务在后台逐步注册
+func LoadAllAsync(cfg *config.Config, registry *mcpinternal.Registry, callback func(*ProxyService, error)) {
+	for _, svcCfg := range cfg.Services {
+		cfg := svcCfg // 捕获循环变量
+		go func() {
+			log.Printf("正在启动代理服务: %s (%s %v)", cfg.Name, cfg.Command, cfg.Args)
+
+			proxySvc, err := NewProxyService(cfg)
+			if err != nil {
+				callback(nil, fmt.Errorf("%s: %w", cfg.Name, err))
+				return
+			}
+
+			if err := registry.Register(proxySvc); err != nil {
+				proxySvc.Close()
+				callback(nil, fmt.Errorf("%s: %w", cfg.Name, err))
+				return
+			}
+
+			callback(proxySvc, nil)
+		}()
+	}
 }

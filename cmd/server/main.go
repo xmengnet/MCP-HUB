@@ -73,14 +73,23 @@ func main() {
 	registry := mcp.NewRegistry(opts...)
 	mcp.SetDefaultRegistry(registry)
 
-	// 加载外部代理服务
+// 启动服务器（先启动，再后台加载服务）
+	go func() {
+		if err := registry.Start(finalAddr); err != nil {
+			log.Fatalf("服务器启动失败: %v", err)
+		}
+	}()
+
+	// 后台加载外部代理服务
 	var proxies []*proxy.ProxyService
 	if cfg != nil && len(cfg.Services) > 0 {
-		var err error
-		proxies, err = proxy.LoadAll(cfg, registry)
-		if err != nil {
-			log.Printf("⚠️  部分代理服务加载失败: %v", err)
-		}
+		proxy.LoadAllAsync(cfg, registry, func(svc *proxy.ProxyService, err error) {
+			if err != nil {
+				log.Printf("⚠️  代理服务加载失败: %v", err)
+				return
+			}
+			proxies = append(proxies, svc)
+		})
 	}
 
 	// 优雅关闭
@@ -96,13 +105,11 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// 启动服务器
-	if err := registry.Start(finalAddr); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+// 阻塞主 goroutine
+		select {}
 	}
-}
 
-// --- 配置解析辅助函数 ---
+	// --- 配置解析辅助函数 ---
 
 // resolveString 按优先级取第一个非空值
 func resolveString(values ...string) string {

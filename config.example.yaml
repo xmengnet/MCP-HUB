@@ -58,6 +58,32 @@ services:
         inherit: false
         allow: ["PATH"]
 
+  # ─── 内置服务：Web 内容抓取 ──────────────────────────────────
+  # 获取网页内容，返回纯文本格式
+  # - name: "Web 抓取"
+  #   description: "获取网页内容，返回纯文本格式"
+  #   command: "./bin/fetch-svc"
+  #   path: "/mcp/fetch"
+  #   sandbox:
+  #     network:
+  #       enabled: true
+  #     env:
+  #       inherit: false
+  #       allow: ["PATH"]
+
+  # ─── 示例: Web 抓取（Python 官方版，支持 Markdown 转换） ────
+  # - name: "Web 抓取 (Python)"
+  #   description: "获取网页内容，自动转换为 Markdown（官方版）"
+  #   command: "uvx"
+  #   args: ["--with", "mcp<2", "mcp-server-fetch"]
+  #   path: "/mcp/fetch-py"
+  #   sandbox:
+  #     network:
+  #       enabled: true
+  #     env:
+  #       inherit: false
+  #       allow: ["PATH"]
+
   # ─── 示例: 文件系统服务（带沙箱配置） ──────────────────────────
   # 限制：只读文件系统、禁止联网、仅传递 PATH 和 HOME 环境变量
   # - name: "文件系统"
