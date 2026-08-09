@@ -13,10 +13,6 @@ import (
 	"mcp-hub/internal/config"
 	"mcp-hub/internal/mcp"
 	"mcp-hub/internal/proxy"
-
-	// 导入服务包触发 init() 自动注册
-	_ "mcp-hub/services/archlinux"
-	_ "mcp-hub/services/workday"
 )
 
 // getEnv 获取环境变量，如果不存在则返回默认值

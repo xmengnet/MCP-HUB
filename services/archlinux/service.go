@@ -6,17 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	mcpinternal "mcp-hub/internal/mcp"
 	"mcp-hub/pkg/archlinux"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
-
-// init 自动注册服务到全局注册器
-func init() {
-	mcpinternal.Register(NewService())
-}
 
 // Service Arch Linux MCP 服务
 type Service struct {
@@ -24,14 +18,14 @@ type Service struct {
 	mcpServer *server.MCPServer
 }
 
-// NewService 创建 Arch Linux MCP 服务
-func NewService() mcpinternal.MCPService {
-	svc := &Service{
+// NewService 创建并返回配置好的 MCP Server（已注册所有工具）
+func NewService() *server.MCPServer {
+	s := &Service{
 		client: archlinux.NewClient(),
 	}
 
 	// 创建 MCP 服务器
-	svc.mcpServer = server.NewMCPServer(
+	s.mcpServer = server.NewMCPServer(
 		"archlinux-service",
 		"1.0.0",
 		server.WithToolCapabilities(false),
@@ -39,28 +33,8 @@ func NewService() mcpinternal.MCPService {
 	)
 
 	// 注册所有工具
-	svc.registerTools()
+	s.registerTools()
 
-	return svc
-}
-
-// Name 返回服务名称
-func (s *Service) Name() string {
-	return "Arch Linux 服务"
-}
-
-// Path 返回服务路径
-func (s *Service) Path() string {
-	return "/mcp/archlinux"
-}
-
-// Description 返回服务描述
-func (s *Service) Description() string {
-	return "Arch Linux 官方仓库和 AUR 软件包搜索服务"
-}
-
-// MCPServer 返回 MCP 服务器实例
-func (s *Service) MCPServer() *server.MCPServer {
 	return s.mcpServer
 }
 

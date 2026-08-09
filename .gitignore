@@ -11,6 +11,7 @@ config.yaml
 *.swo
 *~
 .zcode
+.spec-workflow
 
 # OS
 .DS_Store
@@ -24,7 +25,7 @@ Thumbs.db
 *.dylib
 *.test
 *.out
-
+bin
 # 环境变量
 .env
 .env.local
