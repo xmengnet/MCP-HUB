@@ -66,13 +66,13 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:8080']
 
-  # 如果配置了 Basic Auth 认证
+  # 如果配置了 Basic Auth 认证（账号密码需与 config.yaml 中 prometheus.basic_user/basic_pass 保持一致）
   - job_name: 'mcp-hub-basic'
     scrape_interval: 15s
     metrics_path: /metrics
     basic_auth:
-      username: 'prometheus'
-      password: 'secret'
+      username: 'your-basic-user'
+      password: 'your-basic-pass'
     static_configs:
       - targets: ['localhost:8080']
 ```

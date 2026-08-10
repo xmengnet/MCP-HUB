@@ -145,6 +145,13 @@ func (w *metricsResponseWriter) Write(b []byte) (int, error) {
 func (m *Metrics) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 跳过 /metrics 自身：抓取请求会被反复统计且 user_agent 带版本号，
+			// 既污染 Top 来源 IP/UA 面板，又会在 Prometheus 升级时永久新增时序
+			if r.URL.Path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			service := m.resolveServiceName(r.URL.Path)
 
 			// 提取客户端真实 IP（支持反向代理）
