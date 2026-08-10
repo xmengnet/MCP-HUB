@@ -42,6 +42,9 @@ type SandboxConfig struct {
 type Config struct {
 	// Sandboxes 按语言名索引的沙箱配置
 	Sandboxes map[string]*SandboxConfig
+	// SandboxDir 沙箱 Dockerfile 所在目录（用于镜像不存在时自动构建）
+	// 默认 "./services/code-exec/sandboxes"，环境变量 CODE_EXEC_SANDBOX_DIR 可覆盖
+	SandboxDir string
 }
 
 // 默认资源限制常量
@@ -60,7 +63,8 @@ const (
 // DefaultConfig 返回内置默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Sandboxes: map[string]*SandboxConfig{
+		SandboxDir: "./services/code-exec/sandboxes",
+		Sandboxes:  map[string]*SandboxConfig{
 			"python": {
 				Image:        "mcp-hub/python-sandbox:latest",
 				Command:      []string{"python", "-u", "main.py"},
@@ -115,6 +119,11 @@ func DefaultConfig() *Config {
 //	CODE_EXEC_PYTHON_CPU        覆盖 CPU 核数
 func LoadConfig() *Config {
 	cfg := DefaultConfig()
+
+	// 沙箱 Dockerfile 目录（镜像不存在时自动构建用）
+	if v := os.Getenv("CODE_EXEC_SANDBOX_DIR"); v != "" {
+		cfg.SandboxDir = v
+	}
 
 	for lang, sb := range cfg.Sandboxes {
 		prefix := "CODE_EXEC_" + strings.ToUpper(lang)

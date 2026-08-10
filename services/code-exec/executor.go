@@ -93,8 +93,8 @@ func (e *Executor) Execute(ctx context.Context, lang, code string, timeoutSec in
 	// 3. 构建容器名（使用随机后缀避免冲突）
 	containerName := fmt.Sprintf("mcp-exec-%s-%d", lang, rand.Intn(1000000))
 
-	// 确保 Docker 可用，检查镜像是否存在
-	if err := e.ensureImageAvailable(ctx, sb.Image); err != nil {
+	// 确保 Docker 可用，检查镜像是否存在（不存在则自动拉取或构建）
+	if err := e.ensureImageAvailable(ctx, lang, sb); err != nil {
 		return nil, fmt.Errorf("镜像准备失败: %w", err)
 	}
 
@@ -211,26 +211,67 @@ func buildDockerRunArgs(sb *SandboxConfig, tmpDir, containerName string) []strin
 	return args
 }
 
-// ensureImageAvailable 检查镜像是否存在于本地，不存在则自动拉取
-func (e *Executor) ensureImageAvailable(ctx context.Context, image string) error {
-	// 检查镜像是否已存在
+// ensureImageAvailable 确保镜像可用：
+//  1. 镜像已存在 → 直接使用
+//  2. 不存在 → 尝试 docker pull（远程镜像）
+//  3. pull 失败 → 尝试从本地 Dockerfile 自动构建（docker build）
+//  4. 构建失败 → 返回清晰错误
+func (e *Executor) ensureImageAvailable(ctx context.Context, lang string, sb *SandboxConfig) error {
+	image := sb.Image
+
+	// 1. 检查镜像是否已存在
 	check := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	if check.Run() == nil {
 		return nil // 镜像已存在
 	}
 
-	// 镜像不存在，自动拉取（给较长的超时时间）
-	log.Printf("镜像 %s 不存在，正在拉取...", image)
-	pullCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// 2. 镜像不存在，尝试拉取（可能来自 registry）
+	log.Printf("镜像 %s 不存在，尝试拉取...", image)
+	pullCtx, pullCancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer pullCancel()
+
+	var pullErr bytes.Buffer
+	pull := exec.CommandContext(pullCtx, "docker", "pull", image)
+	pull.Stderr = &pullErr
+	if pull.Run() == nil {
+		log.Printf("镜像 %s 拉取完成", image)
+		return nil
+	}
+	log.Printf("拉取镜像 %s 失败（%s），尝试本地构建...", image, strings.TrimSpace(pullErr.String()))
+
+	// 3. 尝试从本地 Dockerfile 自动构建
+	return e.buildSandboxImage(ctx, lang, sb)
+}
+
+// buildSandboxImage 从本地 Dockerfile 构建沙箱镜像
+func (e *Executor) buildSandboxImage(ctx context.Context, lang string, sb *SandboxConfig) error {
+	buildDir := filepath.Join(e.config.SandboxDir, lang)
+	dockerfile := filepath.Join(buildDir, "Dockerfile")
+
+	if _, err := os.Stat(dockerfile); err != nil {
+		return fmt.Errorf("镜像 %s 拉取失败且本地 Dockerfile 不存在（%s）。"+
+			"请先运行 make build-sandboxes 构建沙箱镜像，或设置 CODE_EXEC_%s_IMAGE 指定自定义镜像",
+			sb.Image, dockerfile, strings.ToUpper(lang))
+	}
+
+	// 构建可能较慢（下载基础镜像 + 安装包），给 10 分钟超时
+	log.Printf("正在自动构建沙箱镜像 %s（从 %s）...", sb.Image, dockerfile)
+	buildCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	pull := exec.CommandContext(pullCtx, "docker", "pull", image)
-	var pullErr bytes.Buffer
-	pull.Stderr = &pullErr
-	if err := pull.Run(); err != nil {
-		return fmt.Errorf("拉取镜像 %s 失败: %v（请手动运行 docker pull 或 make build-sandboxes）: %s",
-			image, err, pullErr.String())
+	var buildOut, buildErr bytes.Buffer
+	build := exec.CommandContext(buildCtx, "docker", "build", "-t", sb.Image, buildDir)
+	build.Stdout = &buildOut
+	build.Stderr = &buildErr
+	if err := build.Run(); err != nil {
+		// 截断输出，避免错误信息过长
+		errMsg := buildErr.String()
+		if len(errMsg) > 500 {
+			errMsg = errMsg[len(errMsg)-500:]
+		}
+		return fmt.Errorf("自动构建沙箱镜像失败: %v（%s）。"+
+			"可手动运行 make build-sandbox/%s 查看完整构建日志", err, errMsg, lang)
 	}
-	log.Printf("镜像 %s 拉取完成", image)
+	log.Printf("沙箱镜像 %s 自动构建完成", sb.Image)
 	return nil
 }

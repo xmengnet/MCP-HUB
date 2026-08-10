@@ -51,6 +51,9 @@ ENV TZ=Asia/Shanghai
 # 从 all-builder 阶段复制所有二进制
 COPY --from=all-builder /app/bin/ ./bin/
 
+# 复制沙箱 Dockerfile（code-exec 镜像不存在时可自动构建）
+COPY --from=all-builder /app/services/code-exec/sandboxes/ ./services/code-exec/sandboxes/
+
 # 暴露端口
 EXPOSE 8080
 

@@ -376,8 +376,15 @@ curl -X POST http://localhost:8080/mcp/workday \
 
 **前置条件:**
 1. Docker 已安装并运行（部署在容器内需挂载 Docker socket）
-2. 沙箱镜像已构建：`make build-sandboxes`
+2. 沙箱镜像**自动管理**：镜像不存在时首次执行会自动构建（无需手动操作）；
+   如需预构建可运行 `make build-sandboxes`
 3. 镜像大小：python 371MB / nodejs 316MB / shell 71MB
+
+**镜像自动构建逻辑（按需触发）:**
+- 镜像已存在 → 直接使用
+- 不存在 → 尝试 `docker pull`（远程镜像）
+- 拉取失败 → 自动从本地 `services/code-exec/sandboxes/<lang>/Dockerfile` 构建
+- 全部失败 → 返回清晰错误提示
 
 **配置（环境变量，可选）:**
 ```bash
@@ -385,6 +392,7 @@ CODE_EXEC_PYTHON_IMAGE=mcp-hub/python-sandbox:latest  # 自定义镜像
 CODE_EXEC_PYTHON_MEMORY=512                           # 内存限制 MB
 CODE_EXEC_PYTHON_NETWORK=none                         # none 或 bridge
 CODE_EXEC_PYTHON_TIMEOUT=60                           # 默认超时秒数
+CODE_EXEC_SANDBOX_DIR=./services/code-exec/sandboxes  # 沙箱 Dockerfile 目录
 CODE_EXEC_NODEJS_IMAGE=... / CODE_EXEC_SHELL_IMAGE=...  # 其他语言同理
 ```
 
