@@ -11,6 +11,8 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      # 挂载 Docker socket，使代码执行沙箱（code-exec）可以创建隔离容器
+      - /var/run/docker.sock:/var/run/docker.sock
     command:
       - "-config"
       - "/app/config.yaml"

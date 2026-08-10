@@ -54,18 +54,26 @@ services:
         allow: ["PATH", "HOME"]
 
   # ─── 内置服务：代码执行沙箱 ──────────────────────────────────
-  # 在安全沙箱中执行 Python 代码，支持文本输出和 matplotlib 图表
+  # Docker 容器隔离的代码执行，支持 Python / Node.js / Shell
+  # 前置条件:
+  #   1. Docker 已安装并运行
+  #   2. 沙箱镜像已构建: make build-sandboxes
+  #   3. 容器部署时需挂载 Docker socket（见 docker-compose.yml）
+  # 可选环境变量（覆盖默认配置）:
+  #   CODE_EXEC_PYTHON_IMAGE / CODE_EXEC_NODEJS_IMAGE / CODE_EXEC_SHELL_IMAGE
+  #   CODE_EXEC_PYTHON_MEMORY / CODE_EXEC_NODEJS_MEMORY / CODE_EXEC_SHELL_MEMORY
+  #   CODE_EXEC_PYTHON_NETWORK (none 或 bridge) 等
   - name: "代码执行沙箱"
-    description: "在安全沙箱中执行 Python 代码，支持文本输出和 matplotlib 图表"
+    description: "Docker 容器隔离的代码执行，支持 Python/Node.js/Shell，自动捕获图表"
     command: "./bin/code-exec-svc"
     path: "/mcp/code-exec"
     sandbox:
       network:
-        enabled: false
-      timeout: "60s"
+        enabled: true
+      timeout: "120s"
       env:
         inherit: false
-        allow: ["PATH"]
+        allow: ["PATH", "HOME", "DOCKER_HOST"]
 
   # ─── 内置服务：Web 内容抓取 ──────────────────────────────────
   # 获取网页内容，返回纯文本格式

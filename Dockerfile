@@ -42,6 +42,7 @@ RUN apk --no-cache add \
     py3-matplotlib \
     py3-uv \
     coreutils \
+    docker-cli \
     && rm -rf /var/cache/apk/*
 
 # 设置时区

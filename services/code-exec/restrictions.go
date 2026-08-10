@@ -1,68 +1,104 @@
 // Package codeexec 提供安全的代码执行沙箱服务。
+//
+// 本文件定义注入到用户 Python 代码前的图表捕获 preamble。
+//
+// 安全说明：Docker 容器是主要安全边界（cap-drop all, no-new-privileges,
+// network none, 非 root 用户）。此处不再做 Python 层的模块限制，
+// 而是专注于自动捕获 matplotlib / plotly 等图表库生成的图片。
+//
+// 工作原理：劫持 plt.show() 和 fig.show()，将图表保存为 PNG 文件到 /sandbox
+// 目录。执行结束后，宿主机的 extractImages() 会扫描该目录提取图片。
 package codeexec
 
-// SecurityPreamble 是注入到用户代码前的 Python 安全限制脚本。
-//
-// 注意：此限制仅作为防御纵深的一层，不可单独依赖。
-// 主要安全由子进程隔离 + 环境过滤 + 资源限制提供。
-const SecurityPreamble = `
-import sys as _sys
-import builtins as _builtins
+const pythonPreamble = `
+# ─── MCP Hub 图表自动捕获 ─────────────────────────────────────
+# 劫持 matplotlib 和 plotly 的 show() 方法，将图表保存为文件
+# 执行结束后由宿主机扫描 /sandbox 目录提取图片
 
-# ─── 1. 禁止危险模块 ────────────────────────────────────────
-_BLOCKED_MODULES = frozenset({
-    'subprocess', 'ctypes', 'shutil', 'importlib',
-    'inspect', 'socket', 'ssl', 'signal',
-})
-
-_ORIGINAL_IMPORT = _builtins.__import__
-
-def _safe_import(name, *args, _orig=_ORIGINAL_IMPORT, _blocked=_BLOCKED_MODULES):
-    top_name = name.split('.')[0]
-    if top_name in _blocked:
-        raise ImportError(f"模块 '{name}' 被禁止使用（安全沙箱限制）")
-    return _orig(name, *args)
-
-_builtins.__import__ = _safe_import
-
-# ─── 2. 限制 os 模块 ────────────────────────────────────────
 import os as _os
+import sys as _sys
 
-_BLOCKED_OS_ATTRS = frozenset({
-    'system', 'popen', 'posix_spawn', 'spawnl', 'spawnle',
-    'spawnlp', 'spawnlpe', 'spawnv', 'spawnve', 'spawnvp',
-    'spawnvpe', 'execv', 'execl', 'execve', 'execle',
-    'execlp', 'execvp', 'execvpe', 'fork', 'forkpty',
-    'kill', 'killpg', 'remove', 'rmdir', 'unlink',
-    'rename', 'chmod', 'chown', 'symlink', 'link',
-    'makedirs', 'mkdir', 'truncate',
-})
+# 图表输出目录（容器内的挂载点，与宿主机临时目录映射）
+_OUTPUT_DIR = "/sandbox"
 
-class _RestrictedOS:
-    def __getattr__(self, name):
-        if name in _BLOCKED_OS_ATTRS:
-            raise PermissionError(f"os.{name} 被禁止使用（安全沙箱限制）")
-        return getattr(_os, name)
-    def __setattr__(self, name, value):
-        raise PermissionError("不允许修改 os 模块属性")
+def _capture_matplotlib():
+    """劫持 matplotlib.pyplot.show()，将所有 figure 保存为 PNG"""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
 
-_sys.modules['os'] = _RestrictedOS()
+        _plot_counter = [0]
 
-# ─── 3. 限制文件写入 ────────────────────────────────────────
-import pathlib as _pathlib
+        def _save_show(*args, **kwargs):
+            for _fig_num in _plt.get_fignums():
+                _fig = _plt.figure(_fig_num)
+                _plot_counter[0] += 1
+                _path = _os.path.join(_OUTPUT_DIR, f"_plot_{_plot_counter[0]}.png")
+                _fig.savefig(_path, format='png', dpi=100, bbox_inches='tight')
+                print(f"[图表已保存: {_path}]")
+                _plt.close(_fig)
 
-_ORIGINAL_OPEN = _builtins.open
-_CWD = _pathlib.Path.cwd().resolve()
+        _plt.show = _save_show
+    except ImportError:
+        pass
 
-def _safe_open(file, mode='r', *args, _orig=_ORIGINAL_OPEN, _cwd=str(_CWD), **kwargs):
-    if 'w' in mode or 'a' in mode or 'x' in mode or '+' in mode:
-        f = _pathlib.Path(file)
-        if not f.is_absolute():
-            f = _pathlib.Path(_cwd) / f
-        f = f.resolve()
-        if not str(f).startswith(_cwd):
-            raise PermissionError(f"不允许在临时目录外写入文件: {file}")
-    return _orig(file, mode, *args, **kwargs)
+def _capture_plotly():
+    """劫持 plotly Figure.show()，优先导出 PNG，失败时降级为 HTML 文件"""
+    try:
+        import plotly.graph_objects as _go
 
-_builtins.open = _safe_open
+        _plotly_counter = [0]
+
+        def _plotly_show(self, *args, **kwargs):
+            _plotly_counter[0] += 1
+            # 尝试导出 PNG（需要 kaleido + Chromium，默认镜像未安装）
+            _png_path = _os.path.join(_OUTPUT_DIR, f"_plotly_{_plotly_counter[0]}.png")
+            try:
+                self.write_image(_png_path, width=1200, height=700, scale=2)
+                print(f"[图表已保存: {_png_path}]")
+                return
+            except Exception:
+                pass
+
+            # 降级：导出 HTML 文件（浏览器可打开，但 MCP 无法直接显示）
+            _html_path = _os.path.join(_OUTPUT_DIR, f"_plotly_{_plotly_counter[0]}.html")
+            try:
+                self.write_html(_html_path, include_plotlyjs=True, full_html=True)
+                print(f"[plotly 图表: 当前环境缺少 kaleido+Chromium，已保存为 HTML: {_html_path}]")
+                print("[提示] 如需返回图片，请改用 matplotlib/seaborn（plt.show() 会自动捕获）")
+            except Exception as _e2:
+                print(f"[plotly 图表导出失败: {_e2}]")
+
+        _go.Figure.show = _plotly_show
+    except ImportError:
+        pass
+
+def _hint_unavailable_packages():
+    """提示未预装的常用包（打印到 stderr，不污染用户 stdout）"""
+    _missing = []
+    for _pkg, _display in (('plotly', 'plotly'), ('sklearn', 'scikit-learn'),
+                           ('pyarrow', 'pyarrow'), ('sympy', 'sympy'),
+                           ('pydantic', 'pydantic')):
+        try:
+            __import__(_pkg)
+        except ImportError:
+            _missing.append(_display)
+    if _missing:
+        _msg = ("[提示] 以下包未预装: " + ", ".join(_missing) +
+                "。如需使用，修改 services/code-exec/sandboxes/python/Dockerfile "
+                "后执行 make build-sandbox/python 重建镜像")
+        _sys.stderr.write(_msg + "\n")
+
+def _capture_seaborn():
+    """seaborn 基于 matplotlib，无需单独劫持，matplotlib 劫持已覆盖"""
+    pass
+
+# 初始化捕获
+_capture_matplotlib()
+_capture_plotly()
+_capture_seaborn()
+_hint_unavailable_packages()
+
+# ─── 用户代码开始 ─────────────────────────────────────────────
 `

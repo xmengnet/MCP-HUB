@@ -10,7 +10,7 @@
 
 - 🔌 **即插即用** - 服务独立为二进制，通过 stdio 代理接入，零代码耦合
 - 🔒 **沙箱安全隔离** - 每个服务可独立配置环境变量白名单、网络控制、文件系统权限
-- 💻 **代码执行沙箱** - 内置安全的 Python 代码执行环境，支持 matplotlib 图表输出
+- 💻 **代码执行沙箱** - Docker 容器隔离的多语言执行环境（Python/Node.js/Shell），自动捕获图表
 - 🌐 **代理模式** - 通过配置文件接入外部 MCP Server，零编码
 - 🛤️ **路径路由** - 每个服务独立路径，互不干扰
 - 🔐 **API Key 认证** - 开箱即用的安全认证
@@ -225,7 +225,7 @@ server {
 |------|------|------|
 | 工作日服务 | `/mcp/workday` | 中国节假日和工作日计算 |
 | Arch Linux 服务 | `/mcp/archlinux` | 官方仓库和 AUR 软件包搜索 |
-| 代码执行沙箱 | `/mcp/code-exec` | 安全的 Python 代码执行环境 |
+| 代码执行沙箱 | `/mcp/code-exec` | Docker 隔离的 Python/Node.js/Shell 执行环境 |
 
 ## 🚀 快速开始
 
@@ -235,21 +235,31 @@ server {
 # 1. 编译所有二进制
 make build
 
-# 2. 复制配置
+# 2.（可选）构建代码执行沙箱镜像（需要 Docker）
+make build-sandboxes
+
+# 3. 复制配置
 cp config.example.yaml config.yaml
 # 编辑 config.yaml 配置 API Key 和服务
 
-# 3. 启动
+# 4. 启动
 ./bin/mcp-server -config config.yaml
 ```
 
 ### Docker Compose
 
 ```bash
+# 1. 构建代码执行沙箱镜像（宿主机上执行一次即可）
+make build-sandboxes
+
+# 2. 启动 MCP Hub（自动挂载 Docker socket 供代码沙箱使用）
 cp config.example.yaml config.yaml
 # 编辑 config.yaml 配置 API Key 和服务
 docker compose up -d
 ```
+
+> ⚠️ **代码执行沙箱需要 Docker**：docker-compose 已挂载 `/var/run/docker.sock`，
+> MCP Hub 容器内的 code-exec 服务会创建独立容器执行代码。
 
 ### Docker 单次运行
 
@@ -257,6 +267,7 @@ docker compose up -d
 docker build -t mcp-hub .
 docker run -d --name mcp-hub -p 8080:8080 \
   -v ./config.yaml:/app/config.yaml:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   mcp-hub:latest
 ```
 
@@ -343,16 +354,39 @@ curl -X POST http://localhost:8080/mcp/workday \
 
 ## 💻 代码执行沙箱工具
 
+基于 **Docker 容器隔离** 的代码执行环境，支持三种语言：
+
 | 工具 | 参数 | 描述 |
 |------|------|------|
-| `execute_python` | `code`, `timeout?` | 在安全沙箱中执行 Python 代码 |
+| `execute_python` | `code`, `timeout?` | 在 Docker 容器中执行 Python 3（预装 numpy/pandas/matplotlib/seaborn） |
+| `execute_nodejs` | `code`, `timeout?` | 在 Docker 容器中执行 Node.js 22（支持 TypeScript） |
+| `execute_shell` | `code`, `timeout?` | 在 Docker 容器中执行 Shell（Alpine + bash + curl/jq/git） |
 
-**安全限制:**
-- 禁止 `subprocess`, `ctypes`, `shutil`, `socket` 等危险模块
-- 禁止 `os.system`, `os.popen`, `os.fork` 等系统调用
-- 文件写入限制在临时目录内
-- 支持 `matplotlib` 图表输出（base64 PNG 嵌入响应）
-- 可配置超时时间（默认 30 秒）
+**安全隔离（每次执行独立容器）:**
+- 丢弃所有 Linux 能力（`--cap-drop=ALL`）+ `no-new-privileges`
+- 非 root 用户执行（`sandbox`）
+- 默认无网络（`--network=none`，可通过环境变量开启）
+- 资源限制：内存 / CPU / 进程数 / 文件描述符
+- 容器退出后自动清理（`--rm`）
+
+**图表输出:**
+- `matplotlib` / `seaborn` 图表自动捕获（调用 `plt.show()` 即可，返回 base64 PNG）
+- 工作目录 `/sandbox` 中生成的图片文件也会自动提取
+- `plotly` 未预装（可自定义镜像），使用时会输出提示到 stderr
+
+**前置条件:**
+1. Docker 已安装并运行（部署在容器内需挂载 Docker socket）
+2. 沙箱镜像已构建：`make build-sandboxes`
+3. 镜像大小：python 371MB / nodejs 316MB / shell 71MB
+
+**配置（环境变量，可选）:**
+```bash
+CODE_EXEC_PYTHON_IMAGE=mcp-hub/python-sandbox:latest  # 自定义镜像
+CODE_EXEC_PYTHON_MEMORY=512                           # 内存限制 MB
+CODE_EXEC_PYTHON_NETWORK=none                         # none 或 bridge
+CODE_EXEC_PYTHON_TIMEOUT=60                           # 默认超时秒数
+CODE_EXEC_NODEJS_IMAGE=... / CODE_EXEC_SHELL_IMAGE=...  # 其他语言同理
+```
 
 ## 🔐 认证
 
@@ -485,15 +519,18 @@ services:
 使用 Makefile 一键构建所有二进制：
 
 ```bash
-make build              # 构建全部
+make build              # 构建全部二进制
 make build/server       # 仅构建主服务
 make build/workday-svc  # 仅构建工作日服务
 make build/code-exec-svc
+make build-sandboxes    # 构建代码执行沙箱 Docker 镜像（python/nodejs/shell）
+make build-sandbox/python  # 构建单个沙箱镜像
+make build-all          # 构建全部（二进制 + 沙箱镜像）
 make clean              # 清理构建产物
 make list               # 列出所有可构建的二进制
 ```
 
-Makefile 自动发现 `services/*/cmd/*/main.go`，新增服务无需修改构建配置。
+Makefile 自动发现 `services/*/cmd/*/main.go` 和 `services/code-exec/sandboxes/*/Dockerfile`，新增服务无需修改构建配置。
 
 ## 🔄 CI/CD
 
@@ -551,11 +588,17 @@ mcp-hub/
 │   ├── archlinux/            # Arch Linux 服务
 │   │   ├── cmd/archlinux-svc/
 │   │   └── service.go
-│   └── code-exec/            # 代码执行沙箱
+│   └── code-exec/            # 代码执行沙箱（Docker 容器隔离）
 │       ├── cmd/code-exec-svc/
-│       ├── service.go
-│       ├── executor.go
-│       └── restrictions.go
+│       ├── config.go         # 沙箱配置（环境变量可覆盖）
+│       ├── service.go        # 3 个 MCP 工具注册
+│       ├── executor.go       # Docker 容器执行器
+│       ├── images.go         # 图表文件提取
+│       ├── restrictions.go   # 图表捕获 preamble
+│       └── sandboxes/        # 沙箱镜像定义（Dockerfile）
+│           ├── python/       # Python 3.13 + numpy/pandas/matplotlib/seaborn
+│           ├── nodejs/       # Node.js 22 + TypeScript
+│           └── shell/        # Alpine + bash + curl/jq/git
 ├── web/                      # Web 前端模板
 │   ├── templates/
 │   │   ├── index.html

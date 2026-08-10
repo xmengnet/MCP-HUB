@@ -1,16 +1,19 @@
 // Package codeexec 提供安全的代码执行沙箱服务。
+//
+// 本文件实现基于 Docker 容器的代码执行器。
+// 每次执行启动独立容器，提供 OS 级隔离：cap-drop all, no-new-privileges,
+// 非 root 用户、网络隔离、资源限制。执行结束后自动清理容器和临时目录。
 package codeexec
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,160 +21,216 @@ import (
 
 // ExecutionResult 代码执行结果
 type ExecutionResult struct {
-	Stdout   string   `json:"stdout"`
-	Stderr   string   `json:"stderr"`
-	Images   []string `json:"images,omitempty"`
-	ExitCode int      `json:"exit_code"`
-	TimedOut bool     `json:"timed_out"`
-	Success  bool     `json:"success"`
+	// Stdout 标准输出
+	Stdout string
+	// Stderr 标准错误
+	Stderr string
+	// Images 提取的图片（base64 编码 + MIME）
+	Images []ImageResult
+	// ExitCode 退出码
+	ExitCode int
+	// TimedOut 是否超时
+	TimedOut bool
+	// Duration 执行耗时
+	Duration time.Duration
 }
 
-// Executor 代码执行引擎
+// Executor Docker 容器代码执行器
 type Executor struct {
-	PythonPath     string
-	DefaultTimeout int
-	MaxMemory      int
-	MaxProcesses   int
+	// config 沙箱配置
+	config *Config
 }
 
-// NewExecutor 创建默认执行器
-func NewExecutor() *Executor {
-	pythonPath := "python3"
-	if _, err := exec.LookPath("python3"); err != nil {
-		if p, err := exec.LookPath("python"); err == nil {
-			pythonPath = p
-		}
-	}
-	return &Executor{
-		PythonPath:     pythonPath,
-		DefaultTimeout: 30,
-		MaxMemory:      256,
-		MaxProcesses:   20,
-	}
+// NewExecutor 创建执行器
+func NewExecutor(cfg *Config) *Executor {
+	return &Executor{config: cfg}
 }
 
-var imagePattern = regexp.MustCompile(`\[IMAGE_DATA_BEGIN\](.*?)\[IMAGE_DATA_END\]`)
+// Execute 执行代码
+//
+// lang: 语言名（"python", "nodejs", "shell"）
+// code: 代码内容
+// timeoutSec: 超时秒数（0 表示使用沙箱默认值）
+func (e *Executor) Execute(ctx context.Context, lang, code string, timeoutSec int) (*ExecutionResult, error) {
+	sb, ok := e.config.Sandboxes[lang]
+	if !ok {
+		return nil, fmt.Errorf("不支持的语言: %s（支持: python, nodejs, shell）", lang)
+	}
 
-// Execute 执行 Python 代码并返回结果
-func (e *Executor) Execute(ctx context.Context, code string, timeoutSec int) (*ExecutionResult, error) {
 	if timeoutSec <= 0 {
-		timeoutSec = e.DefaultTimeout
+		timeoutSec = sb.TimeoutSec
 	}
+	timeoutSec = clampTimeout(timeoutSec)
 
+	// 1. 创建临时目录（宿主机）
 	tmpDir, err := os.MkdirTemp("", "mcp-exec-*")
 	if err != nil {
 		return nil, fmt.Errorf("创建临时目录失败: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
-
-	assembled := buildScript(code)
-	scriptPath := filepath.Join(tmpDir, "_mcp_task.py")
-	if err := os.WriteFile(scriptPath, []byte(assembled), 0644); err != nil {
-		return nil, fmt.Errorf("写入脚本文件失败: %w", err)
+	// 确保临时目录可被容器内非 root 用户读写
+	if err := os.Chmod(tmpDir, 0777); err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, fmt.Errorf("设置临时目录权限失败: %w", err)
 	}
 
+	// 执行结束清理临时目录
+	defer os.RemoveAll(tmpDir)
+
+	// 2. 写入代码文件
+	codeContent := code
+	if sb.WrapPreamble {
+		codeContent = pythonPreamble + "\n" + code
+	}
+	scriptPath := filepath.Join(tmpDir, sb.Entrypoint)
+	if err := os.WriteFile(scriptPath, []byte(codeContent), 0644); err != nil {
+		return nil, fmt.Errorf("写入代码文件失败: %w", err)
+	}
+	// 确保文件可被容器内非 root 用户读取
+	if err := os.Chmod(scriptPath, 0644); err != nil {
+		return nil, fmt.Errorf("设置代码文件权限失败: %w", err)
+	}
+
+	// 3. 构建容器名（使用随机后缀避免冲突）
+	containerName := fmt.Sprintf("mcp-exec-%s-%d", lang, rand.Intn(1000000))
+
+	// 确保 Docker 可用，检查镜像是否存在
+	if err := e.ensureImageAvailable(ctx, sb.Image); err != nil {
+		return nil, fmt.Errorf("镜像准备失败: %w", err)
+	}
+
+	// 4. 创建容器
+	// 创建带超时的 context
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, e.PythonPath, scriptPath)
-	cmd.Dir = tmpDir
-	cmd.Env = []string{
-		fmt.Sprintf("PATH=%s", os.Getenv("PATH")),
-		fmt.Sprintf("HOME=%s", tmpDir),
-		fmt.Sprintf("TMPDIR=%s", tmpDir),
-		"MPLBACKEND=Agg",
-		"PYTHONIOENCODING=utf-8",
-		"PYTHONDONTWRITEBYTECODE=1",
-		"PYTHONHASHSEED=" + strconv.Itoa(rand.Intn(100000)),
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
 	startTime := time.Now()
-	err = cmd.Run()
+	result, err := e.runContainer(execCtx, sb, tmpDir, containerName)
 	elapsed := time.Since(startTime)
+	result.Duration = elapsed
 
-	result := &ExecutionResult{ExitCode: 0, TimedOut: false}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-		} else if execCtx.Err() == context.DeadlineExceeded {
+		// 超时
+		if execCtx.Err() == context.DeadlineExceeded {
 			result.TimedOut = true
 			result.Stderr = fmt.Sprintf("执行超时（%d 秒）", timeoutSec)
+			result.ExitCode = -1
 		} else {
-			result.Stderr = err.Error()
+			result.Stderr = fmt.Sprintf("%s\n%v", result.Stderr, err)
+			result.ExitCode = -1
 		}
 	}
 
-	output := stdout.String()
-	images := extractImages(&output)
-	result.Images = images
-	result.Stdout = strings.TrimSpace(output)
-	result.Stderr = strings.TrimSpace(stderr.String())
-	result.Success = result.ExitCode == 0 && !result.TimedOut
-
-	if result.Stderr != "" {
-		result.Stderr = fmt.Sprintf("%s\n\n⏱ 耗时: %v", result.Stderr, elapsed.Round(time.Millisecond))
-	} else {
-		result.Stderr = fmt.Sprintf("⏱ 耗时: %v", elapsed.Round(time.Millisecond))
+	// 5. 提取图片（Python 沙箱可能生成图表文件）
+	if sb.WrapPreamble && result.ExitCode == 0 {
+		images, _ := extractImages(tmpDir)
+		result.Images = images
 	}
 
 	return result, nil
 }
 
-func buildScript(code string) string {
-	var sb strings.Builder
-	sb.WriteString("#!/usr/bin/env python3\n")
-	sb.WriteString("# MCP Code Execution Sandbox\n\n")
-	sb.WriteString(matplotlibPreamble)
-	sb.WriteString("\n")
-	sb.WriteString(SecurityPreamble)
-	sb.WriteString("\n")
-	sb.WriteString(code)
-	sb.WriteString("\n")
-	return sb.String()
+// runContainer 创建并运行容器，返回执行结果
+func (e *Executor) runContainer(ctx context.Context, sb *SandboxConfig, tmpDir, containerName string) (*ExecutionResult, error) {
+	// 构建完整的执行命令（在容器内执行）
+	// 等价于:
+	// docker run --rm \
+	//   --name mcp-exec-python-123456 \
+	//   --network=none \
+	//   --cap-drop=ALL \
+	//   --security-opt=no-new-privileges:true \
+	//   --memory=256m \
+	//   --cpus=1.0 \
+	//   --pids-limit=128 \
+	//   --ulimit nofile=128:128 \
+	//   -v /tmp/mcp-exec-xxx:/sandbox \
+	//   -w /sandbox \
+	//   mcp-hub/python-sandbox:latest \
+	//   python -u main.py
+	args := buildDockerRunArgs(sb, tmpDir, containerName)
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	result := &ExecutionResult{
+		Stdout:   strings.TrimSpace(stdout.String()),
+		Stderr:   strings.TrimSpace(stderr.String()),
+		ExitCode: 0,
+	}
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+			// docker run 退出码非 0 通常是代码本身的错误，stderr 已包含错误信息
+			// 不返回 error，让上层正常处理
+			return result, nil
+		}
+		// 其他错误（如 Docker 命令本身失败）
+		return result, err
+	}
+
+	return result, nil
 }
 
-const matplotlibPreamble = `
-import matplotlib
-matplotlib.use("Agg")
-try:
-    import matplotlib.pyplot as _plt
-    _ORIGINAL_SHOW = _plt.show
-    def _hijack_show(*args, **kwargs):
-        import io as _io
-        import base64 as _base64
-        figs = _plt.get_fignums()
-        for _fig_num in figs:
-            _fig = _plt.figure(_fig_num)
-            _buf = _io.BytesIO()
-            _fig.savefig(_buf, format='png', dpi=100, bbox_inches='tight')
-            _buf.seek(0)
-            _img_data = _base64.b64encode(_buf.read()).decode('utf-8')
-            _buf.close()
-            _plt.clf()
-            print(f"[IMAGE_DATA_BEGIN]{_img_data}[IMAGE_DATA_END]")
-    _plt.show = _hijack_show
-except ImportError:
-    pass
-`
+// buildDockerRunArgs 构建 docker run 命令参数
+func buildDockerRunArgs(sb *SandboxConfig, tmpDir, containerName string) []string {
+	args := []string{
+		"run",
+		"--rm", // 容器退出后自动删除
+		"--name", containerName,
+		// 安全限制
+		"--network", sb.Network,
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges:true",
+		// 资源限制
+		"--memory", fmt.Sprintf("%dm", sb.MemoryMB),
+		"--cpus", strconv.FormatFloat(sb.CPUCores, 'f', -1, 64),
+		"--pids-limit", strconv.Itoa(sb.PIDLimit),
+		"--ulimit", fmt.Sprintf("nofile=%d:%d", sb.FileLimit, sb.FileLimit),
+		// 工作目录挂载（宿主机临时目录 → 容器 /sandbox）
+		"-v", fmt.Sprintf("%s:/sandbox", tmpDir),
+		"-w", "/sandbox",
+	}
 
-func extractImages(output *string) []string {
-	matches := imagePattern.FindAllStringSubmatch(*output, -1)
-	if len(matches) == 0 {
-		return nil
+	// 只读根文件系统（可选）
+	if sb.ReadOnly {
+		args = append(args, "--read-only")
+		// 即使只读，/sandbox 和 /tmp 仍可写
+		args = append(args, "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m")
 	}
-	images := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if len(m) >= 2 {
-			img := strings.TrimSpace(m[1])
-			if _, err := base64.StdEncoding.DecodeString(img); err == nil {
-				images = append(images, img)
-			}
-		}
+
+	// 镜像名
+	args = append(args, sb.Image)
+
+	// 容器内执行命令
+	args = append(args, sb.Command...)
+
+	return args
+}
+
+// ensureImageAvailable 检查镜像是否存在于本地，不存在则自动拉取
+func (e *Executor) ensureImageAvailable(ctx context.Context, image string) error {
+	// 检查镜像是否已存在
+	check := exec.CommandContext(ctx, "docker", "image", "inspect", image)
+	if check.Run() == nil {
+		return nil // 镜像已存在
 	}
-	*output = imagePattern.ReplaceAllString(*output, "")
-	return images
+
+	// 镜像不存在，自动拉取（给较长的超时时间）
+	log.Printf("镜像 %s 不存在，正在拉取...", image)
+	pullCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	pull := exec.CommandContext(pullCtx, "docker", "pull", image)
+	var pullErr bytes.Buffer
+	pull.Stderr = &pullErr
+	if err := pull.Run(); err != nil {
+		return fmt.Errorf("拉取镜像 %s 失败: %v（请手动运行 docker pull 或 make build-sandboxes）: %s",
+			image, err, pullErr.String())
+	}
+	log.Printf("镜像 %s 拉取完成", image)
+	return nil
 }
