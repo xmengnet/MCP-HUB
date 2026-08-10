@@ -12,6 +12,7 @@ import (
 
 	"mcp-hub/internal/config"
 	mcpinternal "mcp-hub/internal/mcp"
+	"mcp-hub/internal/middleware"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -27,6 +28,7 @@ type ProxyService struct {
 	mcpServer   *server.MCPServer
 	mcpClient   *client.Client
 	sandbox     *config.SandboxConfig
+	metrics     *middleware.Metrics
 }
 
 // NewProxyService 根据配置创建代理服务
@@ -35,7 +37,7 @@ type ProxyService struct {
 // 3. 初始化 MCP 握手
 // 4. 获取远程工具列表
 // 5. 将远程工具注册到本地 MCPServer（handler 透传调用）
-func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
+func NewProxyService(cfg config.ServiceConfig, metrics *middleware.Metrics) (*ProxyService, error) {
 	// 构建并过滤环境变量列表
 	env := buildEnv(cfg.Env, cfg.Sandbox)
 
@@ -99,12 +101,18 @@ func NewProxyService(cfg config.ServiceConfig) (*ProxyService, error) {
 		mcpServer:   mcpServer,
 		mcpClient:   mcpClient,
 		sandbox:     cfg.Sandbox,
+		metrics:     metrics,
 	}
 
 	// 获取远程工具并注册到本地
 	if err := svc.syncTools(); err != nil {
 		mcpClient.Close()
 		return nil, fmt.Errorf("同步工具失败 (%s): %w", cfg.Name, err)
+	}
+
+	// 记录服务在线状态
+	if metrics != nil {
+		metrics.SetServiceUp(cfg.Name, true)
 	}
 
 	return svc, nil
@@ -196,6 +204,8 @@ func (s *ProxyService) syncTools() error {
 // 如果配置了超时，会在 context 上附加超时控制
 func (s *ProxyService) makeToolHandler(toolName string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+
 		// 应用超时控制
 		execCtx := ctx
 		if s.sandbox != nil && s.sandbox.Timeout != "" {
@@ -207,6 +217,18 @@ func (s *ProxyService) makeToolHandler(toolName string) server.ToolHandlerFunc {
 		}
 
 		result, err := s.mcpClient.CallTool(execCtx, req)
+
+		// 记录工具调用指标
+		if s.metrics != nil {
+			status := "ok"
+			if err != nil {
+				status = "error"
+			} else if result != nil && result.IsError {
+				status = "error"
+			}
+			s.metrics.RecordToolCall(s.name, toolName, status, time.Since(start))
+		}
+
 		if err != nil {
 			if execCtx.Err() == context.DeadlineExceeded {
 				return mcp.NewToolResultError(fmt.Sprintf("工具 %q 调用超时 (%s)", toolName, s.sandbox.Timeout)), nil
@@ -226,6 +248,9 @@ func (s *ProxyService) MCPServer() *server.MCPServer { return s.mcpServer }
 
 // Close 关闭与远程服务的连接
 func (s *ProxyService) Close() error {
+	if s.metrics != nil {
+		s.metrics.SetServiceUp(s.name, false)
+	}
 	if s.mcpClient != nil {
 		return s.mcpClient.Close()
 	}
@@ -241,13 +266,13 @@ func sandboxFSMode(fs *config.FSConfig) string {
 }
 
 // LoadAll 从配置加载所有代理服务并注册到 Registry（同步）
-func LoadAll(cfg *config.Config, registry *mcpinternal.Registry) ([]*ProxyService, error) {
+func LoadAll(cfg *config.Config, registry *mcpinternal.Registry, metrics *middleware.Metrics) ([]*ProxyService, error) {
 	var proxies []*ProxyService
 
 	for _, svcCfg := range cfg.Services {
 		log.Printf("正在启动代理服务: %s (%s %v)", svcCfg.Name, svcCfg.Command, svcCfg.Args)
 
-		proxySvc, err := NewProxyService(svcCfg)
+		proxySvc, err := NewProxyService(svcCfg, metrics)
 		if err != nil {
 			log.Printf("⚠️  代理服务启动失败: %s: %v", svcCfg.Name, err)
 			continue // 跳过失败的服务，不影响其他服务
@@ -267,13 +292,13 @@ func LoadAll(cfg *config.Config, registry *mcpinternal.Registry) ([]*ProxyServic
 
 // LoadAllAsync 异步加载所有代理服务，每加载完成一个回调一次
 // 服务器可先启动，服务在后台逐步注册
-func LoadAllAsync(cfg *config.Config, registry *mcpinternal.Registry, callback func(*ProxyService, error)) {
+func LoadAllAsync(cfg *config.Config, registry *mcpinternal.Registry, metrics *middleware.Metrics, callback func(*ProxyService, error)) {
 	for _, svcCfg := range cfg.Services {
 		cfg := svcCfg // 捕获循环变量
 		go func() {
 			log.Printf("正在启动代理服务: %s (%s %v)", cfg.Name, cfg.Command, cfg.Args)
 
-			proxySvc, err := NewProxyService(cfg)
+			proxySvc, err := NewProxyService(cfg, metrics)
 			if err != nil {
 				callback(nil, fmt.Errorf("%s: %w", cfg.Name, err))
 				return

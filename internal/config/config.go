@@ -18,6 +18,20 @@ type Config struct {
 	NoLog bool `yaml:"no_log"`
 	// Services 外部 MCP 服务列表
 	Services []ServiceConfig `yaml:"services"`
+	// Prometheus Prometheus 指标配置（nil 表示不启用）
+	Prometheus *PrometheusConfig `yaml:"prometheus,omitempty"`
+}
+
+// PrometheusConfig Prometheus 指标配置
+type PrometheusConfig struct {
+	// Enabled 是否启用指标采集
+	Enabled bool `yaml:"enabled"`
+	// Token Bearer Token 认证凭证（推荐，优先级高于 Basic Auth），空则不认证
+	Token string `yaml:"token,omitempty"`
+	// BasicUser Basic Auth 用户名
+	BasicUser string `yaml:"basic_user,omitempty"`
+	// BasicPass Basic Auth 密码
+	BasicPass string `yaml:"basic_pass,omitempty"`
 }
 
 // ServiceConfig 外部 MCP 服务配置

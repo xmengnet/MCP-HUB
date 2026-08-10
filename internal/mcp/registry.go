@@ -7,8 +7,10 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
+	"mcp-hub/internal/config"
 	"mcp-hub/internal/middleware"
 	"mcp-hub/web"
 
@@ -67,6 +69,8 @@ type Registry struct {
 	authConfig  middleware.AuthConfig
 	logConfig   middleware.LogConfig
 	middlewares []func(http.Handler) http.Handler
+	metrics     *middleware.Metrics
+	promConfig  *config.PrometheusConfig
 }
 
 // RegistryOption 注册器配置选项
@@ -91,6 +95,19 @@ func WithLogger(enabled bool) RegistryOption {
 func WithMiddleware(mw func(http.Handler) http.Handler) RegistryOption {
 	return func(r *Registry) {
 		r.middlewares = append(r.middlewares, mw)
+	}
+}
+
+// WithPrometheus 启用 Prometheus 指标采集
+func WithPrometheus(metrics *middleware.Metrics, promConfig *config.PrometheusConfig) RegistryOption {
+	return func(r *Registry) {
+		r.metrics = metrics
+		r.promConfig = promConfig
+		if metrics != nil {
+			metrics.SetServiceNameFunc(r.serviceNameForPath)
+			// /metrics 不经过主认证，使用独立的指标认证
+			r.authConfig.ExcludePaths = append(r.authConfig.ExcludePaths, "/metrics")
+		}
 	}
 }
 
@@ -146,9 +163,14 @@ func (r *Registry) Handler() http.Handler {
 		handler = middleware.Auth(r.authConfig)(handler)
 	}
 
-	// 应用日志中间件（最外层）
+	// 应用日志中间件
 	if r.logConfig.Enabled {
 		handler = middleware.Logger(r.logConfig)(handler)
+	}
+
+	// 应用指标中间件（最外层，统计所有请求，包括被认证拒绝的请求）
+	if r.metrics != nil {
+		handler = r.metrics.Middleware()(handler)
 	}
 
 	return handler
@@ -163,6 +185,21 @@ func (r *Registry) ListServices() []MCPService {
 	return services
 }
 
+// serviceNameForPath 将 URL 路径映射到已注册的服务名称
+func (r *Registry) serviceNameForPath(path string) string {
+	for svcPath, svc := range r.services {
+		if path == svcPath || strings.HasPrefix(path, svcPath+"/") {
+			return svc.Name()
+		}
+	}
+	return middleware.ExtractServiceName(path)
+}
+
+// Metrics 返回 Prometheus 指标实例
+func (r *Registry) Metrics() *middleware.Metrics {
+	return r.metrics
+}
+
 // Start 启动 HTTP 服务器
 func (r *Registry) Start(addr string) error {
 	r.addr = addr
@@ -173,6 +210,11 @@ func (r *Registry) Start(addr string) error {
 	r.mux.HandleFunc("/login", r.handleLogin)
 	r.mux.HandleFunc("/logout", r.handleLogout)
 	r.mux.HandleFunc("/playground", r.handlePlayground)
+
+	// 注册 Prometheus 指标路由（在主端口上）
+	if r.metrics != nil {
+		r.mux.HandleFunc("/metrics", r.handleMetrics)
+	}
 
 	log.Println("=================================")
 	log.Printf("  MCP 服务器启动于 %s", addr)
@@ -186,6 +228,19 @@ func (r *Registry) Start(addr string) error {
 
 	if r.logConfig.Enabled {
 		log.Println("📝 请求日志已启用")
+	}
+
+	if r.metrics != nil {
+		authInfo := "无认证"
+		if r.promConfig != nil {
+			switch {
+			case r.promConfig.Token != "":
+				authInfo = "Bearer Token"
+			case r.promConfig.BasicUser != "":
+				authInfo = "Basic Auth"
+			}
+		}
+		log.Printf("📊 Prometheus 指标已启用 (路径: /metrics, 认证: %s)", authInfo)
 	}
 
 	log.Println("已注册的服务:")
@@ -344,4 +399,52 @@ func (r *Registry) handlePlayground(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	web.Templates.ExecuteTemplate(w, "playground.html", data)
+}
+
+// handleMetrics 处理 Prometheus 指标抓取请求
+func (r *Registry) handleMetrics(w http.ResponseWriter, req *http.Request) {
+	// 检查指标认证
+	if r.promConfig != nil {
+		if err := r.checkMetricsAuth(req); err != "" {
+			w.Header().Set("WWW-Authenticate", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":   "unauthorized",
+				"message": "指标访问认证失败",
+			})
+			return
+		}
+	}
+
+	r.metrics.Handler().ServeHTTP(w, req)
+}
+
+// checkMetricsAuth 检查指标请求的认证，返回空字符串表示通过，否则返回 WWW-Authenticate 值
+func (r *Registry) checkMetricsAuth(req *http.Request) string {
+	pc := r.promConfig
+	if pc == nil {
+		return ""
+	}
+
+	// 1. Bearer Token 认证（优先级最高）
+	if pc.Token != "" {
+		auth := req.Header.Get("Authorization")
+		if auth == "Bearer "+pc.Token {
+			return ""
+		}
+		return "Bearer"
+	}
+
+	// 2. Basic Auth 认证
+	if pc.BasicUser != "" || pc.BasicPass != "" {
+		user, pass, ok := req.BasicAuth()
+		if ok && user == pc.BasicUser && pass == pc.BasicPass {
+			return ""
+		}
+		return `Basic realm="MCP Hub Metrics"`
+	}
+
+	// 无认证配置，直接放行
+	return ""
 }

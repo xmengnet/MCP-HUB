@@ -16,6 +16,15 @@ api_keys:
 # 禁用请求日志
 no_log: false
 
+# ─── Prometheus 观测 ──────────────────────────────────────────────
+# 启用后会在主端口 /metrics 路径暴露指标，供 Prometheus 抓取
+# 认证方式：空=无认证，token=Bearer Token，basic_user+basic_pass=Basic Auth
+# prometheus:
+#   enabled: true
+#   # token: "your-prometheus-token"       # Bearer Token（推荐，优先级高）
+#   # basic_user: "prometheus"             # Basic Auth 用户名
+#   # basic_pass: "secret"                 # Basic Auth 密码
+
 # 外部 MCP 服务（通过 stdio 代理接入）
 services:
   # ─── 内置服务：工作日计算 ────────────────────────────────────

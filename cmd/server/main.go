@@ -12,6 +12,7 @@ import (
 
 	"mcp-hub/internal/config"
 	"mcp-hub/internal/mcp"
+	"mcp-hub/internal/middleware"
 	"mcp-hub/internal/proxy"
 )
 
@@ -69,11 +70,18 @@ func main() {
 		opts = append(opts, mcp.WithLogger(true))
 	}
 
+	// 创建 Prometheus 指标实例（如果配置启用）
+	var metrics *middleware.Metrics
+	if cfg != nil && cfg.Prometheus != nil && cfg.Prometheus.Enabled {
+		metrics = middleware.NewMetrics()
+		opts = append(opts, mcp.WithPrometheus(metrics, cfg.Prometheus))
+	}
+
 	// 创建服务注册器并设置为默认（触发内置服务自动注册）
 	registry := mcp.NewRegistry(opts...)
 	mcp.SetDefaultRegistry(registry)
 
-// 启动服务器（先启动，再后台加载服务）
+	// 启动服务器（先启动，再后台加载服务）
 	go func() {
 		if err := registry.Start(finalAddr); err != nil {
 			log.Fatalf("服务器启动失败: %v", err)
@@ -83,7 +91,7 @@ func main() {
 	// 后台加载外部代理服务
 	var proxies []*proxy.ProxyService
 	if cfg != nil && len(cfg.Services) > 0 {
-		proxy.LoadAllAsync(cfg, registry, func(svc *proxy.ProxyService, err error) {
+		proxy.LoadAllAsync(cfg, registry, metrics, func(svc *proxy.ProxyService, err error) {
 			if err != nil {
 				log.Printf("⚠️  代理服务加载失败: %v", err)
 				return

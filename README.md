@@ -17,6 +17,207 @@
 - 📝 **请求日志** - 内置请求日志中间件
 - 🐳 **Docker 支持** - 一键容器化部署，多架构镜像 (amd64 + arm64)
 - 🔄 **CI/CD 自动构建** - 每次提交自动构建测试，打 tag 自动发布到 GHCR
+- 📊 **Prometheus 观测** - 内置指标采集，支持 `/metrics` 端点
+- 📈 **Grafana 面板** - 提供开箱即用的观测仪表盘模板
+
+## 📊 观测与监控
+
+启用 Prometheus 指标后，可在主端口 `/metrics` 路径获取指标数据。
+
+### 快速启用
+
+```yaml
+# config.yaml
+prometheus:
+  enabled: true
+```
+
+### 配置认证（可选）
+
+```yaml
+prometheus:
+  enabled: true
+  # 方式一：Bearer Token（推荐）
+  token: "your-prometheus-token"
+  # 方式二：Basic Auth
+  # basic_user: "prometheus"
+  # basic_pass: "secret"
+```
+
+留空则无认证，适合内网使用。
+
+### Prometheus 抓取配置
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'mcp-hub'
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:8080']
+
+  # 如果配置了 Bearer Token 认证
+  - job_name: 'mcp-hub-auth'
+    scrape_interval: 15s
+    metrics_path: /metrics
+    authorization:
+      credentials: 'your-prometheus-token'
+    static_configs:
+      - targets: ['localhost:8080']
+
+  # 如果配置了 Basic Auth 认证
+  - job_name: 'mcp-hub-basic'
+    scrape_interval: 15s
+    metrics_path: /metrics
+    basic_auth:
+      username: 'prometheus'
+      password: 'secret'
+    static_configs:
+      - targets: ['localhost:8080']
+```
+
+### 可用指标
+
+| 指标名 | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `mcp_http_requests_total` | Counter | `service`, `method`, `status_code`, `remote_addr`, `user_agent` | HTTP 请求总数（含来源 IP 和客户端标识） |
+| `mcp_http_request_duration_seconds` | Histogram | `service`, `method` | 请求延迟分布 |
+| `mcp_http_requests_in_flight` | Gauge | `service` | 当前并发请求数 |
+| `mcp_http_response_size_bytes` | Histogram | `service`, `method` | 响应体大小分布 |
+| `mcp_tool_calls_total` | Counter | `service`, `tool`, `status` | 工具调用总数（ok/error） |
+| `mcp_tool_call_duration_seconds` | Histogram | `service`, `tool` | 工具调用耗时分布 |
+| `mcp_service_up` | Gauge | `service` | 服务在线状态（1=在线，0=离线） |
+| `go_*` | 多种 | — | Go 运行时指标（内存、协程、GC 等） |
+| `process_*` | 多种 | — | 进程资源指标 |
+
+### Grafana 仪表盘
+
+项目提供了开箱即用的 Grafana 仪表盘模板，位于 `grafana/dashboard.json`。
+
+**导入方式：**
+
+1. 打开 Grafana Web UI → **Connections** → **Data Sources** → 添加 Prometheus 数据源
+2. 左侧菜单 → **Dashboards** → **New** → **Import**
+3. 上传 `grafana/dashboard.json` 或粘贴文件内容
+4. 选择 Prometheus 数据源 → **Import**
+
+仪表盘包含以下面板：
+
+| 面板 | 说明 |
+|------|------|
+| 服务健康状态 | 各 MCP 代理服务的在线/离线状态 |
+| HTTP 请求速率 | 每秒请求数（按服务划分） |
+| HTTP 请求延迟 (P50/P95/P99) | 请求延迟百分位分布 |
+| HTTP 状态码分布 | 各状态码的请求速率 |
+| 并发请求数 | 当前正在处理的请求数 |
+| 响应体大小分布 | 响应体大小 P50/P95/P99 |
+| MCP 工具调用速率 | 每秒工具调用数（按服务/工具划分） |
+| MCP 工具调用错误率 | 工具调用错误比例 |
+| MCP 工具调用延迟 (P95) | 工具调用 P95 延迟 |
+| Go 堆内存使用 | 堆内存分配情况 |
+| Go 协程数 | 当前 Goroutine 数量 |
+| Go GC 暂停时间 | 垃圾回收暂停时间 |
+| Top 来源 IP | 请求量最多的客户端 IP 地址 |
+| Top 客户端标识 | 请求量最多的 User-Agent |
+
+### 验证指标
+
+```bash
+# 直接访问（无认证）
+curl http://localhost:8080/metrics
+
+# Bearer Token 认证
+curl -H "Authorization: Bearer your-token" http://localhost:8080/metrics
+
+# Basic Auth 认证
+curl -u prometheus:secret http://localhost:8080/metrics
+```
+
+### 配置字段
+
+| 字段 | 说明 | 默认值 |
+|------|------|--------|
+| `prometheus.enabled` | 是否启用指标采集 | `false` |
+| `prometheus.token` | Bearer Token 认证凭证 | 空（无认证） |
+| `prometheus.basic_user` | Basic Auth 用户名 | 空 |
+| `prometheus.basic_pass` | Basic Auth 密码 | 空 |
+
+---
+
+## 🚢 部署注意事项
+
+### Docker 部署对指标的影响
+
+在 Docker 中运行时，`mcp_http_requests_total` 的 `remote_addr` 标签会显示 Docker 网关 IP（如 `172.17.0.1`），而非真实客户端 IP。这是 Docker 网络 NAT 的正常行为，不影响其他指标（延迟、状态码、工具调用等）的准确性。
+
+**如果需要获取真实客户端 IP**，建议在 Docker 前面加一层反向代理（如 Nginx），通过 `X-Forwarded-For` 头传递真实 IP。
+
+### Nginx 反向代理配置
+
+由于 MCP Hub 使用 SSE（Server-Sent Events）进行流式通信，Nginx 反向代理需要特殊配置：
+
+```nginx
+upstream mcp-hub {
+    server 127.0.0.1:8080;
+    keepalive 64;
+}
+
+server {
+    listen 80;
+    server_name mcp.example.com;
+
+    # MCP Hub 主服务
+    location / {
+        proxy_pass http://mcp-hub;
+
+        # SSE 必需：禁用缓冲，保证流式传输
+        proxy_buffering off;
+        proxy_cache off;
+
+        # 传递真实客户端 IP
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+
+        # SSE 长连接超时设置
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+
+        # HTTP 版本
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # 请求体大小限制（代码执行可能上传较大内容）
+        client_max_body_size 10m;
+    }
+
+    # 指标路径（如需独立控制）
+    location /metrics {
+        proxy_pass http://mcp-hub;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+**关键配置说明：**
+
+| 配置项 | 说明 |
+|--------|------|
+| `proxy_buffering off` | **必须**。SSE 依赖流式响应，Nginx 默认会缓冲，导致延迟增加或连接卡死 |
+| `proxy_read_timeout 86400s` | SSE 连接可能长期保持，默认 60s 超时会断开连接 |
+| `proxy_http_version 1.1` | 禁用 HTTP/1.0 以支持长连接和分块传输 |
+| `proxy_set_header X-Real-IP` | 将真实客户端 IP 传递给后端，供日志和指标使用 |
+| `client_max_body_size 10m` | 代码执行沙箱可能上传较大 Python 脚本 |
+
+**Nginx 下 `remote_addr` 说明：**
+
+配置了 `proxy_set_header X-Real-IP $remote_addr` 后，MCP Hub 会自动识别 `X-Real-IP` 或 `X-Forwarded-For` 请求头，并在 `mcp_http_requests_total` 的 `remote_addr` 标签中使用真实客户端 IP。优先级顺序：`X-Forwarded-For`（取第一个 IP）> `X-Real-IP` > 直连 IP。
+
+---
 
 ## 内置服务
 
@@ -337,8 +538,9 @@ mcp-hub/
 │   │   ├── service.go        # MCPService 接口定义
 │   │   └── registry.go       # 服务注册器 + HTTP 路由 + Web 页面
 │   ├── middleware/
-│   │   └── middleware.go     # 认证/日志中间件
-│   └── proxy/proxy.go        # stdio 代理服务（含沙箱隔离）
+	│   │   ├── middleware.go     # 认证/日志中间件
+	│   │   └── metrics.go       # Prometheus 指标采集中间件
+	│   └── proxy/proxy.go        # stdio 代理服务（含沙箱隔离）
 ├── pkg/                      # 公共库
 │   ├── holiday/              # 中国节假日计算
 │   └── archlinux/            # Arch Linux 包搜索客户端
@@ -364,6 +566,8 @@ mcp-hub/
 ├── Dockerfile                # 多目标多阶段构建
 ├── docker-compose.yml
 ├── .github/workflows/ci.yml  # CI/CD 流水线
+├── grafana/
+│   └── dashboard.json        # Grafana 观测面板模板
 ├── config.example.yaml
 └── go.mod
 ```
