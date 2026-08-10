@@ -125,6 +125,14 @@ func LoadConfig() *Config {
 		cfg.SandboxDir = v
 	}
 
+	// MCP_SANDBOX_NETWORK: proxy 层注入的沙箱网络配置
+	// config.yaml 中 sandbox.network.enabled: true 时，所有语言沙箱容器联网（bridge）
+	if v := os.Getenv("MCP_SANDBOX_NETWORK"); v == "true" || v == "1" {
+		for _, sb := range cfg.Sandboxes {
+			sb.Network = "bridge"
+		}
+	}
+
 	for lang, sb := range cfg.Sandboxes {
 		prefix := "CODE_EXEC_" + strings.ToUpper(lang)
 

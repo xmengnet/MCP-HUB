@@ -41,6 +41,11 @@ func NewProxyService(cfg config.ServiceConfig, metrics *middleware.Metrics) (*Pr
 	// 构建并过滤环境变量列表
 	env := buildEnv(cfg.Env, cfg.Sandbox)
 
+	// 将沙箱配置注入为约定环境变量（MCP_SANDBOX_*），供子进程读取
+	// 例如 code-exec-svc 会根据 MCP_SANDBOX_NETWORK 决定沙箱容器是否联网
+	// 这样 config.yaml 中的 sandbox.network.enabled 配置能真正驱动子进程行为
+	env = append(env, sandboxEnvVars(cfg.Sandbox)...)
+
 	// 使用自定义 CommandFunc 来精确控制子进程环境变量
 	// 原因: mcp-go 默认的 cmd.Env = append(os.Environ(), env...) 会把宿主环境全部传进去
 	// 我们的自定义函数会用 buildEnv 的结果完全替换，实现真正的环境隔离
@@ -179,7 +184,25 @@ func buildEnv(cfgEnv map[string]string, sandbox *config.SandboxConfig) []string 
 	return filtered
 }
 
-// syncTools 从远程服务获取工具列表并注册到本地 MCPServer
+// sandboxEnvVars 将沙箱配置转换为约定环境变量（MCP_SANDBOX_*）
+// 供子进程（如 code-exec-svc）读取，使 config.yaml 的 sandbox 配置真正生效。
+// 这些变量绕过 env 白名单过滤，始终传递给子进程。
+func sandboxEnvVars(sb *config.SandboxConfig) []string {
+	if sb == nil {
+		return nil
+	}
+	var vars []string
+	if sb.Network != nil {
+		vars = append(vars, fmt.Sprintf("MCP_SANDBOX_NETWORK=%t", sb.Network.Enabled))
+	}
+	if sb.Timeout != "" {
+		vars = append(vars, fmt.Sprintf("MCP_SANDBOX_TIMEOUT=%s", sb.Timeout))
+	}
+	if sb.Memory != "" {
+		vars = append(vars, fmt.Sprintf("MCP_SANDBOX_MEMORY=%s", sb.Memory))
+	}
+	return vars
+}
 func (s *ProxyService) syncTools() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

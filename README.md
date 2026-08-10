@@ -365,9 +365,19 @@ curl -X POST http://localhost:8080/mcp/workday \
 **安全隔离（每次执行独立容器）:**
 - 丢弃所有 Linux 能力（`--cap-drop=ALL`）+ `no-new-privileges`
 - 非 root 用户执行（`sandbox`）
-- 默认无网络（`--network=none`，可通过环境变量开启）
+- 网络隔离：默认无网络，可通过 config.yaml 或环境变量开启
 - 资源限制：内存 / CPU / 进程数 / 文件描述符
 - 容器退出后自动清理（`--rm`）
+
+**沙箱容器生命周期:**
+- 沙箱容器**不是常驻进程**，每次调用工具时创建，执行完自动删除（`--rm`）
+- `code-exec-svc` 进程由主服务启动时自动拉起（stdio 子进程），无需手动操作
+
+**网络配置（重要）:**
+- `config.yaml` 中 code-exec 服务的 `sandbox.network.enabled` 控制**沙箱容器内代码**是否联网
+- `true` → 沙箱容器使用 bridge 网络（可访问外网）；`false`/未配置 → 无网络（默认）
+- 该配置由主服务通过 `MCP_SANDBOX_NETWORK` 环境变量自动传递给 code-exec-svc，无需手动设置
+- 如需更细粒度控制，可用 `CODE_EXEC_<LANG>_NETWORK` 环境变量单独覆盖（优先级更高）
 
 **图表输出:**
 - `matplotlib` / `seaborn` 图表自动捕获（调用 `plt.show()` 即可，返回 base64 PNG）

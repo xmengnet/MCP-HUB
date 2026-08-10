@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir \
 # 创建非 root 用户
 RUN useradd -m -s /bin/bash sandbox
 
-# 设置工作目录（与宿主机临时目录的挂载点一致）
+# 设置工作目录并授权给 sandbox 用户（代码通过 docker cp 传入，非 bind mount）
 WORKDIR /sandbox
+RUN chown sandbox:sandbox /sandbox
 
 USER sandbox

@@ -130,30 +130,54 @@ func (e *Executor) Execute(ctx context.Context, lang, code string, timeoutSec in
 }
 
 // runContainer 创建并运行容器，返回执行结果
+//
+// 使用 docker cp 传递代码文件（而非 -v 挂载）:
+// 挂载方式在「MCP Hub 运行于容器内」的场景下有路径问题 —— 容器内创建的
+// 临时目录路径，宿主机 Docker daemon 看不到，导致挂载空目录。
+// docker cp 通过 Docker API 传输文件，不依赖宿主机路径，任何部署方式都正确。
+//
+// 执行流程:
+//   1. docker create（以 sleep 保持运行，因为部分 Docker 实现只支持对运行中容器 cp）
+//   2. docker start
+//   3. docker cp 代码文件进容器
+//   4. docker exec 执行代码（捕获 stdout/stderr/退出码）
+//   5. docker cp 容器内生成的文件（图片等）回临时目录
+//   6. docker rm -f 清理容器
 func (e *Executor) runContainer(ctx context.Context, sb *SandboxConfig, tmpDir, containerName string) (*ExecutionResult, error) {
-	// 构建完整的执行命令（在容器内执行）
-	// 等价于:
-	// docker run --rm \
-	//   --name mcp-exec-python-123456 \
-	//   --network=none \
-	//   --cap-drop=ALL \
-	//   --security-opt=no-new-privileges:true \
-	//   --memory=256m \
-	//   --cpus=1.0 \
-	//   --pids-limit=128 \
-	//   --ulimit nofile=128:128 \
-	//   -v /tmp/mcp-exec-xxx:/sandbox \
-	//   -w /sandbox \
-	//   mcp-hub/python-sandbox:latest \
-	//   python -u main.py
-	args := buildDockerRunArgs(sb, tmpDir, containerName)
+	// 1. 创建容器（以 sleep 保持运行，便于 docker cp）
+	createArgs := buildDockerCreateArgs(sb, containerName)
+	create := exec.CommandContext(ctx, "docker", createArgs...)
+	createOut, err := create.Output()
+	if err != nil {
+		return &ExecutionResult{}, fmt.Errorf("创建容器失败: %v", err)
+	}
+	containerID := strings.TrimSpace(string(createOut))
 
+	// 确保容器始终被清理（即使执行超时或被取消）
+	defer func() {
+		rmCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		exec.CommandContext(rmCtx, "docker", "rm", "-f", containerID).Run()
+	}()
+
+	// 2. 启动容器
+	if out, err := exec.CommandContext(ctx, "docker", "start", containerID).CombinedOutput(); err != nil {
+		return &ExecutionResult{}, fmt.Errorf("启动容器失败: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// 3. 复制代码文件进容器
+	scriptPath := filepath.Join(tmpDir, sb.Entrypoint)
+	cpIn := exec.CommandContext(ctx, "docker", "cp", scriptPath, containerID+":/sandbox/"+sb.Entrypoint)
+	if out, err := cpIn.CombinedOutput(); err != nil {
+		return &ExecutionResult{}, fmt.Errorf("复制代码到容器失败: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// 4. 在容器内执行代码（docker exec 直接返回命令退出码）
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
+	execCmd := exec.CommandContext(ctx, "docker", append([]string{"exec", containerID}, sb.Command...)...)
+	execCmd.Stdout = &stdout
+	execCmd.Stderr = &stderr
+	execErr := execCmd.Run()
 
 	result := &ExecutionResult{
 		Stdout:   strings.TrimSpace(stdout.String()),
@@ -161,26 +185,35 @@ func (e *Executor) runContainer(ctx context.Context, sb *SandboxConfig, tmpDir, 
 		ExitCode: 0,
 	}
 
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			// docker run 退出码非 0 通常是代码本身的错误，stderr 已包含错误信息
-			// 不返回 error，让上层正常处理
-			return result, nil
+	if execErr != nil {
+		// 上下文被取消/超时：返回错误，让上层标记 TimedOut
+		if ctx.Err() != nil {
+			return result, execErr
 		}
-		// 其他错误（如 Docker 命令本身失败）
-		return result, err
+		if exitErr, ok := execErr.(*exec.ExitError); ok {
+			// 代码本身错误（stderr 已含错误信息），正常处理
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			// 其他错误（如 Docker 命令本身失败）
+			return result, execErr
+		}
 	}
+
+	// 5. 提取容器内生成的文件（图片等）回临时目录
+	cpOut := exec.CommandContext(ctx, "docker", "cp", containerID+":/sandbox/.", tmpDir+string(filepath.Separator))
+	cpOut.Run() // 容器内可能没有文件，失败忽略
 
 	return result, nil
 }
 
-// buildDockerRunArgs 构建 docker run 命令参数
-func buildDockerRunArgs(sb *SandboxConfig, tmpDir, containerName string) []string {
+// buildDockerCreateArgs 构建 docker create 命令参数
+// 容器以 sleep 保持运行（便于 docker cp 传文件），代码通过 docker exec 执行
+func buildDockerCreateArgs(sb *SandboxConfig, containerName string) []string {
 	args := []string{
-		"run",
-		"--rm", // 容器退出后自动删除
+		"create",
 		"--name", containerName,
+		// 以 sleep 保持容器运行，代码通过 docker exec 执行
+		"--entrypoint", "/bin/sleep",
 		// 安全限制
 		"--network", sb.Network,
 		"--cap-drop", "ALL",
@@ -190,8 +223,7 @@ func buildDockerRunArgs(sb *SandboxConfig, tmpDir, containerName string) []strin
 		"--cpus", strconv.FormatFloat(sb.CPUCores, 'f', -1, 64),
 		"--pids-limit", strconv.Itoa(sb.PIDLimit),
 		"--ulimit", fmt.Sprintf("nofile=%d:%d", sb.FileLimit, sb.FileLimit),
-		// 工作目录挂载（宿主机临时目录 → 容器 /sandbox）
-		"-v", fmt.Sprintf("%s:/sandbox", tmpDir),
+		// 工作目录（镜像中已创建并授权给 sandbox 用户）
 		"-w", "/sandbox",
 	}
 
@@ -202,11 +234,8 @@ func buildDockerRunArgs(sb *SandboxConfig, tmpDir, containerName string) []strin
 		args = append(args, "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m")
 	}
 
-	// 镜像名
-	args = append(args, sb.Image)
-
-	// 容器内执行命令
-	args = append(args, sb.Command...)
+	// 镜像名 + sleep 时长（600 秒，远超最大超时 300 秒，确保容器一直存活）
+	args = append(args, sb.Image, "600")
 
 	return args
 }

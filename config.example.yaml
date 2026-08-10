@@ -60,7 +60,13 @@ services:
   #   2. 容器部署时需挂载 Docker socket（见 docker-compose.yml）
   # 镜像自动管理: 首次执行时若镜像不存在，会自动 pull 或从本地
   #   services/code-exec/sandboxes/<lang>/Dockerfile 构建，无需手动操作
-  # 可选环境变量（覆盖默认配置）:
+  #
+  # 网络说明: 下方 sandbox.network.enabled 控制「沙箱容器内代码」是否能联网
+  #   - true: 沙箱容器使用 bridge 网络（可访问外网）
+  #   - false/未配置: 沙箱容器无网络（默认，更安全）
+  # 注意: 这里配置的是沙箱容器网络，不是 code-exec-svc 进程本身的网络
+  #
+  # 可选环境变量（覆盖默认配置，优先级高于 sandbox.network）:
   #   CODE_EXEC_PYTHON_IMAGE / CODE_EXEC_NODEJS_IMAGE / CODE_EXEC_SHELL_IMAGE
   #   CODE_EXEC_PYTHON_MEMORY / CODE_EXEC_NODEJS_MEMORY / CODE_EXEC_SHELL_MEMORY
   #   CODE_EXEC_PYTHON_NETWORK (none 或 bridge) 等
